@@ -46,7 +46,8 @@ WebsocketCommandInstance.prototype.onReady = function() {
 }
 
 WebsocketCommandInstance.prototype.sendString = function(str) {
-  this.sock.send(str);
+  var msg = JSON.stringify({type: 'key', value: str})
+  this.sock.send(msg);
 };
 
 WebsocketCommandInstance.prototype.onMessage = function(event) {
@@ -55,7 +56,9 @@ WebsocketCommandInstance.prototype.onMessage = function(event) {
   }
 };
 
-WebsocketCommandInstance.prototype.onTerminalResize = function() {
+WebsocketCommandInstance.prototype.onTerminalResize = function(width, height) {
+  var msg = JSON.stringify({type: 'resize', value: { cols: width, rows: height}})
+  this.sock.send(msg);
 };
 
 WebsocketCommandInstance.prototype.exit = function() {

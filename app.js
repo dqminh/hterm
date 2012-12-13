@@ -36,9 +36,16 @@ function handleConnection(conn) {
   term.on('data', function(data)  {
     conn.write(data);
   });
-  conn.on('data', function(data) {
-    term.write(data);
+
+  conn.on('data', function(msg) {
+    var data = JSON.parse(msg);
+    if (data.type == 'key') {
+      term.write(data.value);
+    } else if (data.type == 'resize') {
+      term.resize(data.value.cols, data.value.rows);
+    }
   });
+
   conn.on('close', function() {
     term.destroy();
   });
