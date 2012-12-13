@@ -1942,74 +1942,6 @@ hterm.Terminal.prototype.showZoomWarning_ = function(state) {
 };
 
 /**
- * Show the terminal overlay for a given amount of time.
- *
- * The terminal overlay appears in inverse video in a large font, centered
- * over the terminal.  You should probably keep the overlay message brief,
- * since it's in a large font and you probably aren't going to check the size
- * of the terminal first.
- *
- * @param {string} msg The text (not HTML) message to display in the overlay.
- * @param {number} opt_timeout The amount of time to wait before fading out
- *     the overlay.  Defaults to 1.5 seconds.  Pass null to have the overlay
- *     stay up forever (or until the next overlay).
- */
-hterm.Terminal.prototype.showOverlay = function(msg, opt_timeout) {
-  if (!this.overlayNode_) {
-    if (!this.div_)
-      return;
-
-    this.overlayNode_ = this.document_.createElement('div');
-    this.overlayNode_.style.cssText = (
-        'border-radius: 15px;' +
-        'font-size: xx-large;' +
-        'opacity: 0.75;' +
-        'padding: 0.2em 0.5em 0.2em 0.5em;' +
-        'position: absolute;' +
-        '-webkit-user-select: none;' +
-        '-webkit-transition: opacity 180ms ease-in;');
-  }
-
-  this.overlayNode_.style.color = this.prefs_.get('background-color');
-  this.overlayNode_.style.backgroundColor = this.prefs_.get('foreground-color');
-  this.overlayNode_.style.fontFamily = this.prefs_.get('font-family');
-
-  this.overlayNode_.textContent = msg;
-  this.overlayNode_.style.opacity = '0.75';
-
-  if (!this.overlayNode_.parentNode)
-    this.div_.appendChild(this.overlayNode_);
-
-  this.overlayNode_.style.top = (
-      this.div_.clientHeight - this.overlayNode_.clientHeight) / 2;
-  this.overlayNode_.style.left = (
-      this.div_.clientWidth - this.overlayNode_.clientWidth -
-      this.scrollbarWidthPx) / 2;
-
-  var self = this;
-
-  if (this.overlayTimeout_)
-    clearTimeout(this.overlayTimeout_);
-
-  if (opt_timeout === null)
-    return;
-
-  this.overlayTimeout_ = setTimeout(function() {
-      self.overlayNode_.style.opacity = '0';
-      setTimeout(function() {
-          if (self.overlayNode_.parentNode)
-            self.overlayNode_.parentNode.removeChild(self.overlayNode_);
-          self.overlayTimeout_ = null;
-          self.overlayNode_.style.opacity = '0.75';
-        }, 200);
-    }, opt_timeout || 1500);
-};
-
-hterm.Terminal.prototype.overlaySize = function() {
-  this.showOverlay(this.screenSize.width + 'x' + this.screenSize.height);
-};
-
-/**
  * Invoked by hterm.Terminal.Keyboard when a VT keystroke is detected.
  *
  * @param {string} string The VT string representing the keystroke.
@@ -2058,7 +1990,6 @@ hterm.Terminal.prototype.onResize_ = function() {
   this.realizeSize_(columnCount, rowCount);
   this.scheduleSyncCursorPosition_();
   this.showZoomWarning_(this.scrollPort_.characterSize.zoomFactor != 1);
-  this.overlaySize();
 };
 
 /**
