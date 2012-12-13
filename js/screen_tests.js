@@ -15,8 +15,8 @@ hterm.Screen.Tests = new TestManager.Suite('hterm.Screen.Tests');
  */
 hterm.Screen.Tests.prototype.preamble = function(result, cx) {
   cx.window.document.body.innerHTML = '';
-  cx.window.screen = this.screen = new hterm.Screen();
-  cx.window.screen.setColumnCount(80);
+  cx.window_screen = this.screen = new hterm.Screen();
+  cx.window_screen.setColumnCount(80);
 };
 
 /**

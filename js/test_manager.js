@@ -556,7 +556,7 @@ TestManager.TestRun.prototype.onUncaughtException_ = function(
     return true;
   }
 
-  if (!this.currentResult)
+  if (!this.currentResult || !(this.currentResult.status == this.currentResult.FAILED))
     return;
 
   if (message == 'Uncaught ' + this.currentResult.expectedErrorMessage_) {

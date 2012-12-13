@@ -76,11 +76,6 @@ hterm.Terminal = function(opt_profileName) {
   this.scrollOnOutput_ = this.prefs_.get('scroll-on-output');
   this.scrollOnKeystroke_ = this.prefs_.get('scroll-on-keystroke');
 
-  // Terminal bell sound.
-  this.bellAudio_ = this.document_.createElement('audio');
-  this.bellAudio_.setAttribute('src', this.prefs_.get('audible-bell-sound'));
-  this.bellAudio_.setAttribute('preload', 'auto');
-
   // Cursor position and attributes saved with DECSC.
   this.savedOptions_ = {};
 
@@ -164,35 +159,10 @@ hterm.Terminal.prototype.setProfile = function(profileName) {
     ],
 
     /**
-     * Terminal bell sound.  Empty string for no audible bell.
-     */
-    ['audible-bell-sound', '../audio/bell.ogg', function(v) {
-        self.bellAudio_.setAttribute('src', v);
-      }
-    ],
-
-    /**
      * The background color for text with no other color attributes.
      */
     ['background-color', 'rgb(16, 16, 16)', function(v) {
         self.scrollPort_.setBackgroundColor(v);
-      }
-    ],
-
-    /**
-     * The background image.
-     *
-     * Defaults to a subtle light-to-transparent-to-dark gradient that is
-     * mostly transparent.
-     */
-    ['background-image',
-     ('-webkit-linear-gradient(bottom, ' +
-      'rgba(0,0,0,0.01) 0%, ' +
-      'rgba(0,0,0,0) 30%, ' +
-      'rgba(255,255,255,0) 70%, ' +
-      'rgba(255,255,255,0.05) 100%)'),
-     function(v) {
-        self.scrollPort_.setBackgroundImage(v);
       }
     ],
 
@@ -870,7 +840,7 @@ hterm.Terminal.prototype.decorate = function(div) {
   this.div_ = div;
 
   this.scrollPort_.decorate(div);
-  this.scrollPort_.setBackgroundImage(this.prefs_.get('background-image'));
+  this.scrollPort_.setBackgroundColor('black');
 
   this.div_.focus = this.focus.bind(this);
 
@@ -1698,9 +1668,6 @@ hterm.Terminal.prototype.setReverseVideo = function(state) {
  * Ring the terminal bell.
  */
 hterm.Terminal.prototype.ringBell = function() {
-  if (this.bellAudio_.getAttribute('src'))
-    this.bellAudio_.play();
-
   this.cursorNode_.style.backgroundColor =
       this.scrollPort_.getForegroundColor();
 
