@@ -179,6 +179,9 @@ hterm.ScrollPort.prototype.decorate = function(div) {
                                               this.onResize_.bind(this));
 
   var doc = this.document_ = this.iframe_.contentDocument;
+  // for FF, force open/close so we can modify iframe content
+  doc.open();
+  doc.close();
   doc.body.style.cssText = (
       'margin: 0px;' +
       'padding: 0px;' +
