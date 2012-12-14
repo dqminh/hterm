@@ -1,0 +1,17 @@
+{
+  "name": "hterm",
+  "description": "port of chrome's hterm",
+  "author": "Daniel Dao Quang Minh",
+  "version": "0.0.1",
+  "repository": "git://github.com/dqminh/hterm.git",
+  "homepage": "https://github.com/dqmimnh/hterm",
+  "bugs": {
+    "url": "https://github.com/dqminh/hterm/issues"
+  },
+  "dependencies": {
+    "pty.js"      : "~0.1.x",
+    "mincer"      : "~0.4.x",
+    "node-static" : "~0.6.x",
+    "sockjs"      : "~0.3.x"
+  }
+}
