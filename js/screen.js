@@ -341,9 +341,12 @@ hterm.Screen.prototype.setCursorPosition = function(row, column) {
 /**
  * Set the provided selection object to be a caret selection at the current
  * cursor position.
+ *
+ * TODO: somehow this is broken in firefox ...
  */
 hterm.Screen.prototype.syncSelectionCaret = function(selection) {
-  selection.collapse(this.cursorNode_, this.cursorOffset_);
+  //console.log(selection, this.cursorNode_, this.cursorOffset_);
+  //selection.collapse(this.cursorNode_, this.cursorOffset_);
 };
 
 /**
