@@ -2,10 +2,68 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Namespace for color utilities.
  */
-hterm.colors = {};
+lib.colors = {};
+
+/**
+ * First, some canned regular expressions we're going to use in this file.
+ *
+ *
+ *                              BRACE YOURSELF
+ *
+ *                                 ,~~~~.
+ *                                 |>_< ~~
+ *                                3`---'-/.
+ *                                3:::::\v\
+ *                               =o=:::::\,\
+ *                                | :::::\,,\
+ *
+ *                        THE REGULAR EXPRESSIONS
+ *                               ARE COMING.
+ *
+ * There's no way to break long RE literals in JavaScript.  Fix that why don't
+ * you?  Oh, and also there's no way to write a string that doesn't interpret
+ * escapes.
+ *
+ * Instead, we stoop to this .replace() trick.
+ */
+lib.colors.re_ = {
+  // CSS hex color, #RGB.
+  hex16: /#([a-f0-9])([a-f0-9])([a-f0-9])/i,
+
+  // CSS hex color, #RRGGBB.
+  hex24: /#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})/i,
+
+  // CSS rgb color, rgb(rrr,ggg,bbb).
+  rgb: new RegExp(
+      ('^/s*rgb/s*/(/s*(/d{1,3})/s*,/s*(/d{1,3})/s*,' +
+       '/s*(/d{1,3})/s*/)/s*$'
+       ).replace(/\//g, '\\'), 'i'),
+
+  // CSS rgb color, rgb(rrr,ggg,bbb,aaa).
+  rgba: new RegExp(
+      ('^/s*rgba/s*' +
+       '/(/s*(/d{1,3})/s*,/s*(/d{1,3})/s*,/s*(/d{1,3})/s*' +
+       '(?:,/s*(/d+(?:/./d+)?)/s*)/)/s*$'
+       ).replace(/\//g, '\\'), 'i'),
+
+  // Either RGB or RGBA.
+  rgbx: new RegExp(
+      ('^/s*rgba?/s*' +
+       '/(/s*(/d{1,3})/s*,/s*(/d{1,3})/s*,/s*(/d{1,3})/s*' +
+       '(?:,/s*(/d+(?:/./d+)?)/s*)?/)/s*$'
+       ).replace(/\//g, '\\'), 'i'),
+
+  // An X11 "rgb:ddd/ddd/ddd" value.
+  x11rgb: /^\s*rgb:([a-f0-9]{1,4})\/([a-f0-9]{1,4})\/([a-f0-9]{1,4})\s*$/i,
+
+  // English color name.
+  name: /[a-z][a-z0-9\s]+/,
+};
 
 /**
  * Convert a CSS rgb(ddd,ddd,ddd) color value into an X11 color value.
@@ -18,7 +76,7 @@ hterm.colors = {};
  * @return {string} The X11 color value or null if the value could not be
  *     converted.
  */
-hterm.colors.cssToX11 = function(value) {
+lib.colors.rgbToX11 = function(value) {
   function scale(v) {
     v = (Math.min(v, 255) * 257).toString(16);
     while (v.length < 4)
@@ -27,8 +85,7 @@ hterm.colors.cssToX11 = function(value) {
     return v;
   }
 
-  var ary = value.match(
-      /^\s*rgb\s*\((\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)\s*$/i);
+  var ary = value.match(lib.colors.re_.rgbx);
   if (!ary)
     return null;
 
@@ -46,7 +103,7 @@ hterm.colors.cssToX11 = function(value) {
  * @return {string} The CSS color value or null if the value could not be
  *     converted.
  */
-hterm.colors.x11ToCSS = function(v) {
+lib.colors.x11ToCSS = function(v) {
   function scale(v) {
     // Pad out values with less than four digits.  This padding (probably)
     // matches xterm.  It's difficult to say for sure since xterm seems to
@@ -78,13 +135,12 @@ hterm.colors.x11ToCSS = function(v) {
     return Math.round(parseInt(v, 16) / 257);
   }
 
-  var ary = v.match(
-      /^\s*rgb:([a-f0-9]{1,4})\/([a-f0-9]{1,4})\/([a-f0-9]{1,4})\s*$/i);
+  var ary = v.match(lib.colors.re_.x11rgb);
   if (!ary)
-    return hterm.colors.nameToRGB(v);
+    return lib.colors.nameToRGB(v);
 
-  return 'rgb(' + scale(ary[1]) + ', ' + scale(ary[2]) + ', ' +
-      scale(ary[3]) + ')';
+  ary.splice(0, 1);
+  return lib.colors.arrayToRGBA(ary.map(scale));
 };
 
 /**
@@ -98,15 +154,17 @@ hterm.colors.x11ToCSS = function(v) {
  *     convert.
  * @return {string|Array.<string>} The converted value or values.
  */
-hterm.colors.hexToRGB = function(arg) {
+lib.colors.hexToRGB = function(arg) {
   function convert(hex) {
-    var ary = hex.match(/#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})/i);
+    var re = (hex.length == 4) ?
+	lib.colors.re_.hex16 : lib.colors.re_.hex24;
+    var ary = hex.match(re)
     if (!ary)
       return null;
 
     return 'rgb(' + parseInt(ary[1], 16) + ', ' +
-        parseInt(ary[2], 16) + ', ' +
-        parseInt(ary[3], 16) + ')';
+	parseInt(ary[2], 16) + ', ' +
+	parseInt(ary[3], 16) + ')';
   }
 
   if (arg instanceof Array) {
@@ -121,6 +179,110 @@ hterm.colors.hexToRGB = function(arg) {
 };
 
 /**
+ * Converts one or more CSS rgb(...) forms into their '#RRGGBB' color values.
+ *
+ * If given an rgba(...) form, the alpha field is thrown away.
+ *
+ * Arrays are converted in place. If a value cannot be converted, it is
+ * replaced with null.
+ *
+ * @param {string|Array.<string>} A single rgb(...) value or array of rgb(...)
+ *     values to convert.
+ * @return {string|Array.<string>} The converted value or values.
+ */
+lib.colors.rgbToHex = function(arg) {
+  function convert(rgb) {
+    var ary = lib.colors.crackRGB(rgb);
+    return '#' + ((parseInt(ary[0]) << 16) |
+		  (parseInt(ary[1]) <<  8) |
+		  (parseInt(ary[2]) <<  0)).toString(16);
+  }
+
+  if (arg instanceof Array) {
+    for (var i = 0; i < arg.length; i++) {
+      arg[i] = convert(arg[i]);
+    }
+  } else {
+    arg = convert(arg);
+  }
+
+  return arg;
+};
+
+/**
+ * Take any valid css color definition and turn it into an rgb or rgba value.
+ *
+ * Returns null if the value could not be normalized.
+ */
+lib.colors.normalizeCSS = function(def) {
+  if (def.substr(0, 1) == '#')
+    return lib.colors.hexToRGB(def);
+
+  if (lib.colors.re_.rgbx.test(def))
+    return def;
+
+  return lib.colors.nameToRGB(def);
+};
+
+/**
+ * Convert a 3 or 4 element array into an rgba(...) string.
+ */
+lib.colors.arrayToRGBA = function(ary) {
+  var alpha = (ary.length > 3) ? ary[3] : 1;
+  return 'rgba(' + ary[0] + ', ' + ary[1] + ', ' + ary[2] + ', ' + alpha + ')';
+};
+
+/**
+ * Overwrite the alpha channel of an rgb/rgba color.
+ */
+lib.colors.setAlpha = function(rgb, alpha) {
+  var ary = lib.colors.crackRGB(rgb);
+  ary[3] = alpha;
+  return lib.colors.arrayToRGBA(ary);
+};
+
+/**
+ * Mix a percentage of a tint color into a base color.
+ */
+lib.colors.mix = function(base, tint, percent) {
+  var ary1 = lib.colors.crackRGB(base);
+  var ary2 = lib.colors.crackRGB(tint);
+
+  for (var i = 0; i < 4; ++i) {
+    var diff = ary1[i] - ary2[i];
+    ary1[i] += diff * percent;
+  }
+
+  return lib.colors.arrayToRGBA(ary);
+};
+
+/**
+ * Split an rgb/rgba color into an array of its components.
+ *
+ * On success, a 4 element array will be returned.  For rgb values, the alpha
+ * will be set to 1.
+ */
+lib.colors.crackRGB = function(color) {
+  if (color.substr(0, 4) == 'rgba') {
+    var ary = color.match(lib.colors.re_.rgba);
+    if (ary) {
+      ary.shift();
+      return ary;
+    }
+  } else {
+    var ary = color.match(lib.colors.re_.rgb);
+    if (ary) {
+      ary.shift();
+      ary.push(1);
+      return ary;
+    }
+  }
+
+  console.error('Couldn\'t crack: ' + color);
+  return null;
+};
+
+/**
  * Convert an X11 color name into a CSS rgb(...) value.
  *
  * Names are stripped of spaces and converted to lowercase.  If the name is
@@ -132,25 +294,25 @@ hterm.colors.hexToRGB = function(arg) {
  * @param {string} name The color name to convert.
  * @return {string} The corresponding CSS rgb(...) value.
  */
-hterm.colors.nameToRGB = function(name) {
-  if (name in hterm.colors.colorNames)
-    return hterm.colors.colorNames[name];
+lib.colors.nameToRGB = function(name) {
+  if (name in lib.colors.colorNames)
+    return lib.colors.colorNames[name];
 
   name = name.toLowerCase();
-  if (name in hterm.colors.colorNames)
-    return hterm.colors.colorNames[name];
+  if (name in lib.colors.colorNames)
+    return lib.colors.colorNames[name];
 
   name = name.replace(/\s+/g, '');
-  if (name in hterm.colors.colorNames)
-    return hterm.colors.colorNames[name];
+  if (name in lib.colors.colorNames)
+    return lib.colors.colorNames[name];
 
   return null;
 };
 
 /**
- * The default color palette.
+ * The stock color palette.
  */
-hterm.colors.defaultColorPalette = hterm.colors.hexToRGB
+lib.colors.stockColorPalette = lib.colors.hexToRGB
   ([// The "ANSI 16"...
     '#000000', '#CC0000', '#4E9A06', '#C4A000',
     '#3465A4', '#75507B', '#06989A', '#D3D7CF',
@@ -207,11 +369,15 @@ hterm.colors.defaultColorPalette = hterm.colors.hexToRGB
     '#BCBCBC', '#C6C6C6', '#D0D0D0', '#DADADA', '#E4E4E4', '#EEEEEE'
    ]);
 
+/**
+ * The current color palette, possibly with user changes.
+ */
+lib.colors.colorPalette = lib.colors.stockColorPalette;
 
 /**
  * Named colors according to the stock X11 rgb.txt file.
  */
-hterm.colors.colorNames = {
+lib.colors.colorNames = {
   "aliceblue": "rgb(240, 248, 255)",
   "antiquewhite": "rgb(250, 235, 215)",
   "antiquewhite1": "rgb(255, 239, 219)",

@@ -2,8 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('hterm.Keyboard.KeyActions');
+
 /**
  * The default key map for hterm.
+ *
+ * Contains a mapping of keyCodes to keyDefs (aka key definitions).  The key
+ * definition tells the hterm.Keyboard class how to handle keycodes.
  *
  * This should work for most cases, as the printable characters get handled
  * in the keypress event.  In that case, even if the keycap is wrong in the
@@ -20,23 +27,89 @@
  * The sequences defined in this key map come from [XTERM] as referenced in
  * vt.js, starting with the section titled "Alt and Meta Keys".
  */
-hterm.Keyboard.KeyMap.Default = function(keyboard) {
-  hterm.Keyboard.KeyMap.apply(this, [keyboard, 'default']);
+hterm.Keyboard.KeyMap = function(keyboard) {
+  this.keyboard = keyboard;
+  this.keyDefs = {};
   this.reset();
+};
+
+/**
+ * Add a single key definition.
+ *
+ * The definition is a hash containing the following keys: 'keyCap', 'normal',
+ * 'control', and 'alt'.
+ *
+ *  - keyCap is a string identifying the key.  For printable
+ *    keys, the key cap should be exactly two characters, starting with the
+ *    unshifted version.  For example, 'aA', 'bB', '1!' and '=+'.  For
+ *    non-printable the key cap should be surrounded in square braces, as in
+ *    '[INS]', '[LEFT]'.  By convention, non-printable keycaps are in uppercase
+ *    but this is not a strict requirement.
+ *
+ *  - Normal is the action that should be performed when they key is pressed
+ *    in the absence of any modifier.  See below for the supported actions.
+ *
+ *  - Control is the action that should be performed when they key is pressed
+ *    along with the control modifier.  See below for the supported actions.
+ *
+ *  - Alt is the action that should be performed when they key is pressed
+ *    along with the alt modifier.  See below for the supported actions.
+ *
+ *  - Meta is the action that should be performed when they key is pressed
+ *    along with the meta modifier.  See below for the supported actions.
+ *
+ * Actions can be one of the hterm.Keyboard.KeyActions as documented below,
+ * a literal string, or an array.  If the action is a literal string then
+ * the string is sent directly to the host.  If the action is an array it
+ * is taken to be an escape sequence that may be altered by modifier keys.
+ * The second-to-last element of the array will be overwritten with the
+ * state of the modifier keys, as specified in the final table of "PC-Style
+ * Function Keys" from [XTERM].
+ */
+hterm.Keyboard.KeyMap.prototype.addKeyDef = function(keyCode, def) {
+  if (keyCode in this.keyDefs)
+    console.warn('Duplicate keyCode: ' + keyCode);
+
+  this.keyDefs[keyCode] = def;
+};
+
+/**
+ * Add mutiple key definitions in a single call.
+ *
+ * This function takes the key definitions as variable argument list.  Each
+ * argument is the key definition specified as an array.
+ *
+ * (If the function took everything as one big hash we couldn't detect
+ * duplicates, and there would be a lot more typing involved.)
+ *
+ * Each key definition should have 6 elements: (keyCode, keyCap, normal action,
+ * control action, alt action and meta action).  See KeyMap.addKeyDef for the
+ * meaning of these elements.
+ */
+hterm.Keyboard.KeyMap.prototype.addKeyDefs = function(var_args) {
+  for (var i = 0; i < arguments.length; i++) {
+    this.addKeyDef(arguments[i][0],
+		   { keyCap: arguments[i][1],
+		     normal: arguments[i][2],
+		     control: arguments[i][3],
+		     alt: arguments[i][4],
+		     meta: arguments[i][5]
+		   });
+  }
 };
 
 /**
  * Inherit from hterm.Keyboard.KeyMap, as defined in keyboard.js.
  */
-hterm.Keyboard.KeyMap.Default.prototype = {
+hterm.Keyboard.KeyMap.prototype = {
   __proto__: hterm.Keyboard.KeyMap.prototype
 };
 
 /**
  * Set up the default state for this keymap.
  */
-hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
-  hterm.Keyboard.KeyMap.prototype.reset.apply(this);
+hterm.Keyboard.KeyMap.prototype.reset = function() {
+  this.keyDefs = {};
 
   var self = this;
 
@@ -54,7 +127,7 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
   function ak(a, b) {
     return function(e, k) {
       var action = (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey ||
-                    !self.keyboard.applicationKeypad) ? a : b;
+		    !self.keyboard.applicationKeypad) ? a : b;
       return resolve(action, e, k);
     }
   }
@@ -64,7 +137,7 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
   function ac(a, b) {
     return function(e, k) {
       var action = (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey ||
-                    !self.keyboard.applicationCursor) ? a : b;
+		    !self.keyboard.applicationCursor) ? a : b;
       return resolve(action, e, k);
     }
   }
@@ -122,19 +195,19 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
     [0,   '[UNKNOWN]', PASS, PASS, PASS, PASS],
 
     // First row.
-    [27,  '[ESC]', ESC,                       DEFAULT, DEFAULT, DEFAULT],
-    [112, '[F1]',  mod(SS3 + 'P', CSI + 'P'), DEFAULT, DEFAULT, DEFAULT],
-    [113, '[F2]',  mod(SS3 + 'Q', CSI + 'Q'), DEFAULT, DEFAULT, DEFAULT],
-    [114, '[F3]',  mod(SS3 + 'R', CSI + 'R'), DEFAULT, DEFAULT, DEFAULT],
-    [115, '[F4]',  mod(SS3 + 'S', CSI + 'S'), DEFAULT, DEFAULT, DEFAULT],
-    [116, '[F5]',  CSI + '15~',               DEFAULT, DEFAULT, DEFAULT],
-    [117, '[F6]',  CSI + '17~',               DEFAULT, DEFAULT, DEFAULT],
-    [118, '[F7]',  CSI + '18~',               DEFAULT, DEFAULT, DEFAULT],
-    [119, '[F8]',  CSI + '19~',               DEFAULT, DEFAULT, DEFAULT],
-    [120, '[F9]',  CSI + '20~',               DEFAULT, DEFAULT, DEFAULT],
-    [121, '[F10]', CSI + '21~',               DEFAULT, DEFAULT, DEFAULT],
-    [122, '[F11]', CSI + '23~',               DEFAULT, DEFAULT, DEFAULT],
-    [123, '[F12]', CSI + '24~',               DEFAULT, DEFAULT, DEFAULT],
+    [27,  '[ESC]', ESC,                       DEFAULT, DEFAULT,     DEFAULT],
+    [112, '[F1]',  mod(SS3 + 'P', CSI + 'P'), DEFAULT, CSI + "23~", DEFAULT],
+    [113, '[F2]',  mod(SS3 + 'Q', CSI + 'Q'), DEFAULT, CSI + "24~", DEFAULT],
+    [114, '[F3]',  mod(SS3 + 'R', CSI + 'R'), DEFAULT, CSI + "25~", DEFAULT],
+    [115, '[F4]',  mod(SS3 + 'S', CSI + 'S'), DEFAULT, CSI + "26~", DEFAULT],
+    [116, '[F5]',  CSI + '15~',               DEFAULT, CSI + "28~", DEFAULT],
+    [117, '[F6]',  CSI + '17~',               DEFAULT, CSI + "29~", DEFAULT],
+    [118, '[F7]',  CSI + '18~',               DEFAULT, CSI + "31~", DEFAULT],
+    [119, '[F8]',  CSI + '19~',               DEFAULT, CSI + "32~", DEFAULT],
+    [120, '[F9]',  CSI + '20~',               DEFAULT, CSI + "33~", DEFAULT],
+    [121, '[F10]', CSI + '21~',               DEFAULT, CSI + "34~", DEFAULT],
+    [122, '[F11]', CSI + '23~',               DEFAULT, CSI + "42~", DEFAULT],
+    [123, '[F12]', CSI + '24~',               DEFAULT, CSI + "43~", DEFAULT],
 
     // Second row.
     [192, '`~', DEFAULT, sh(ctl('@'), ctl('^')),        DEFAULT,        PASS],
@@ -153,7 +226,7 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
     [8,   '[BKSP]', bs('\x7f', '\b'), bs('\b', '\x7f'), DEFAULT,     DEFAULT],
 
     // Third row.
-    [9,   '[TAB]', '\t',    STRIP,     DEFAULT, DEFAULT],
+    [9,   '[TAB]', '\t',    STRIP,     PASS,    DEFAULT],
     [81,  'qQ',    DEFAULT, ctl('Q'),  DEFAULT, DEFAULT],
     [87,  'wW',    DEFAULT, ctl('W'),  DEFAULT, DEFAULT],
     [69,  'eE',    DEFAULT, ctl('E'),  DEFAULT, DEFAULT],
@@ -194,7 +267,7 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
     [67,  'cC',   DEFAULT, call('onCtrlC_'),       DEFAULT, call('onMetaC_')],
     [86,  'vV',   DEFAULT, sh(ctl('V'), PASS),     DEFAULT, PASS],
     [66,  'bB',   DEFAULT, sh(ctl('B'), PASS),     DEFAULT, sh(DEFAULT, PASS)],
-    [78,  'nN',   DEFAULT, ctl('N'),               DEFAULT, DEFAULT],
+    [78,  'nN',   DEFAULT, call('onCtrlN_'),       DEFAULT, call('onMetaN_')],
     [77,  'mM',   DEFAULT, ctl('M'),               DEFAULT, DEFAULT],
     [188, ',<',   DEFAULT, STRIP,                  DEFAULT, DEFAULT],
     [190, '.>',   DEFAULT, STRIP,                  DEFAULT, DEFAULT],
@@ -213,7 +286,7 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
     [19,  '[BREAK]',  PASS, PASS, PASS, PASS],
 
     // The block of six keys above the arrows.
-    [45,  '[INSERT]', CSI + '2~',             DEFAULT, DEFAULT, DEFAULT],
+    [45,  '[INSERT]', call('onKeyInsert_'),   DEFAULT, DEFAULT, DEFAULT],
     [36,  '[HOME]',   call('onKeyHome_'),     DEFAULT, DEFAULT, DEFAULT],
     [33,  '[PGUP]',   call('onKeyPageUp_'),   DEFAULT, DEFAULT, DEFAULT],
     [46,  '[DEL]',    CSI + '3~',             DEFAULT, DEFAULT, DEFAULT],
@@ -252,12 +325,22 @@ hterm.Keyboard.KeyMap.Default.prototype.reset = function() {
 };
 
 /**
+ * Either allow the paste or send a key sequence.
+ */
+hterm.Keyboard.KeyMap.prototype.onKeyInsert_ = function(e) {
+  if (this.keyboard.shiftInsertPaste && e.shiftKey)
+    return hterm.Keyboard.KeyActions.PASS;
+
+  return '\x1b[2~';
+};
+
+/**
  * Either scroll the scrollback buffer or send a key sequence.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onKeyHome_ = function(e) {
+hterm.Keyboard.KeyMap.prototype.onKeyHome_ = function(e) {
   if (!this.keyboard.homeKeysScroll ^ e.shiftKey) {
     if ((e.altey || e.ctrlKey || e.shiftKey) ||
-        !this.keyboard.applicationKeypad) {
+	!this.keyboard.applicationKeypad) {
       return '\x1b[H';
     }
 
@@ -271,10 +354,10 @@ hterm.Keyboard.KeyMap.Default.prototype.onKeyHome_ = function(e) {
 /**
  * Either scroll the scrollback buffer or send a key sequence.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onKeyEnd_ = function(e) {
+hterm.Keyboard.KeyMap.prototype.onKeyEnd_ = function(e) {
   if (!this.keyboard.homeKeysScroll ^ e.shiftKey) {
     if ((e.altKey || e.ctrlKey || e.shiftKey) ||
-        !this.keyboard.applicationKeypad) {
+	!this.keyboard.applicationKeypad) {
       return '\x1b[F';
     }
 
@@ -288,7 +371,7 @@ hterm.Keyboard.KeyMap.Default.prototype.onKeyEnd_ = function(e) {
 /**
  * Either scroll the scrollback buffer or send a key sequence.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onKeyPageUp_ = function(e) {
+hterm.Keyboard.KeyMap.prototype.onKeyPageUp_ = function(e) {
   if (!this.keyboard.pageKeysScroll ^ e.shiftKey)
     return '\x1b[5~';
 
@@ -299,7 +382,7 @@ hterm.Keyboard.KeyMap.Default.prototype.onKeyPageUp_ = function(e) {
 /**
  * Either scroll the scrollback buffer or send a key sequence.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onKeyPageDown_ = function(e) {
+hterm.Keyboard.KeyMap.prototype.onKeyPageDown_ = function(e) {
   if (!this.keyboard.pageKeysScroll ^ e.shiftKey)
     return '\x1b[6~';
 
@@ -317,17 +400,47 @@ hterm.Keyboard.KeyMap.Default.prototype.onKeyPageDown_ = function(e) {
  * heard them, and also to give them a chance to send a ^C by just hitting
  * the key again.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onCtrlC_ = function(e, keyDef) {
-  var document = this.keyboard.terminal.getDocument();
-  if (e.shiftKey || document.getSelection().isCollapsed) {
-    // If the shift key is being held, or there is no document selection, send
-    // a ^C.
+hterm.Keyboard.KeyMap.prototype.onCtrlC_ = function(e, keyDef) {
+  var selection = this.keyboard.terminal.getDocument().getSelection();
+  if (e.shiftKey || selection.isCollapsed) {
+    // If the shift key is being held or there is no document selection, then
+    // send a ^C.
     return '\x03';
   }
 
-  // Otherwise let the browser handle it as a copy command.
-  setTimeout(function() { document.getSelection().collapseToEnd() }, 50);
+  // Otherwise let the browser handle it as a copy command.  Clear the selection
+  // soon after a Ctrl-C copy, so that it frees up Ctrl-C to send ^C.
+  setTimeout(selection.collapseToEnd.bind(selection), 750);
   return hterm.Keyboard.KeyActions.PASS;
+};
+
+/**
+ * Either send a ^N or open a new window to the same location.
+ */
+hterm.Keyboard.KeyMap.prototype.onCtrlN_ = function(e, keyDef) {
+  if (e.shiftKey) {
+    window.open(document.location.href, '',
+		'chrome=no,close=yes,resize=yes,scrollbars=yes,' +
+		'minimizable=yes');
+    return hterm.Keyboard.KeyActions.CANCEL;
+  }
+
+  return '\x0e';
+};
+
+/**
+ * Either the default action or open a new window to the same location.
+ */
+hterm.Keyboard.KeyMap.prototype.onMetaN_ = function(e, keyDef) {
+  if (e.shiftKey) {
+    window.open(document.location.href, '',
+		'chrome=no,close=yes,resize=yes,scrollbars=yes,' +
+		'minimizable=yes,width=' + window.outerWidth +
+		',height=' + window.outerHeight);
+    return hterm.Keyboard.KeyActions.CANCEL;
+  }
+
+  return hterm.Keyboard.KeyActions.DEFAULT;
 };
 
 /**
@@ -341,7 +454,7 @@ hterm.Keyboard.KeyMap.Default.prototype.onCtrlC_ = function(e, keyDef) {
  * the selection so the user knows we heard them, and also to give them a
  * chance to send a Meta-C by just hitting the key again.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onMetaC_ = function(e, keyDef) {
+hterm.Keyboard.KeyMap.prototype.onMetaC_ = function(e, keyDef) {
   var document = this.keyboard.terminal.getDocument();
   if (e.shiftKey || document.getSelection().isCollapsed) {
     // If the shift key is being held, or there is no document selection, send
@@ -365,7 +478,7 @@ hterm.Keyboard.KeyMap.Default.prototype.onMetaC_ = function(e, keyDef) {
  * We override the browser zoom keys to change the ScrollPort's font size to
  * avoid the issue.
  */
-hterm.Keyboard.KeyMap.Default.prototype.onZoom_ = function(e, keyDef) {
+hterm.Keyboard.KeyMap.prototype.onZoom_ = function(e, keyDef) {
   if (this.keyboard.terminal.getZoomFactor() != 1) {
     // If we're not at 1:1 zoom factor, let the Ctrl +/-/0 keys control the
     // browser zoom, so it's easier to for the user to get back to 100%.

@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.colors');
+
 /**
  * Constructor for TextAttribute objects.
  *
@@ -25,6 +29,9 @@ hterm.TextAttributes = function(document) {
   // and backgroundIndex contain the canonical values.
   this.foreground = this.DEFAULT_COLOR;
   this.background = this.DEFAULT_COLOR;
+
+  this.defaultForeground = 'rgb(255, 255, 255)';
+  this.defaultBackground = 'rgb(0, 0, 0)';
 
   this.bold = false;
   this.blink = false;
@@ -95,7 +102,8 @@ hterm.TextAttributes.prototype.reset = function() {
  * Reset the color palette to the default state.
  */
 hterm.TextAttributes.prototype.resetColorPalette = function() {
-  this.colorPalette = hterm.colors.defaultColorPalette.concat();
+  this.colorPalette = lib.colors.colorPalette.concat();
+  this.syncColors();
 };
 
 /**
@@ -105,12 +113,12 @@ hterm.TextAttributes.prototype.resetColorPalette = function() {
  */
 hterm.TextAttributes.prototype.isDefault = function() {
   return (this.foregroundIndex == null &&
-          this.backgroundIndex == null &&
-          !this.bold &&
-          !this.blink &&
-          !this.underline &&
-          !this.inverse &&
-          !this.invisible);
+	  this.backgroundIndex == null &&
+	  !this.bold &&
+	  !this.blink &&
+	  !this.underline &&
+	  !this.inverse &&
+	  !this.invisible);
 };
 
 /**
@@ -177,10 +185,17 @@ hterm.TextAttributes.prototype.matchesContainer = function(obj) {
   var style = obj.style;
 
   return (this.foreground == style.color &&
-          this.background == style.backgroundColor &&
-          (this.enableBold && this.bold) == !!style.fontWeight &&
-          this.blink == !!style.fontStyle &&
-          this.underline == !!style.textDecoration);
+	  this.background == style.backgroundColor &&
+	  (this.enableBold && this.bold) == !!style.fontWeight &&
+	  this.blink == !!style.fontStyle &&
+	  this.underline == !!style.textDecoration);
+};
+
+hterm.TextAttributes.prototype.setDefaults = function(foreground, background) {
+  this.defaultForeground = foreground;
+  this.defaultBackground = background;
+
+  this.syncColors();
 };
 
 /**
@@ -193,19 +208,15 @@ hterm.TextAttributes.prototype.matchesContainer = function(obj) {
  *     inverse text foreground.
  *
  */
-hterm.TextAttributes.prototype.updateColors = function(terminalForeground,
-                                                       terminalBackground) {
+hterm.TextAttributes.prototype.syncColors = function() {
   function getBrightIndex(i) {
     if (i < 8) {
       // If the color is from the lower half of the ANSI 16, add 8.
       return i + 8;
     }
 
-    if (i >= 16 && i <= 250) {
-      // If it's from the extended palette, add 6.
-      return i + 6;
-    }
-
+    // If it's not from the 16 color palette, ignore bold requests.  This
+    // matches the behavior of gnome-terminal.
     return i;
   }
 
@@ -218,8 +229,8 @@ hterm.TextAttributes.prototype.updateColors = function(terminalForeground,
     foregroundIndex = this.backgroundIndex;
     backgroundIndex = this.foregroundIndex;
     // We can't inherit the container's color anymore.
-    defaultForeground = terminalBackground;
-    defaultBackground = terminalForeground;
+    defaultForeground = this.defaultBackground;
+    defaultBackground = this.defaultForeground;
   }
 
   if (this.bold) {
@@ -231,9 +242,9 @@ hterm.TextAttributes.prototype.updateColors = function(terminalForeground,
     foregroundIndex = backgroundIndex;
 
   this.foreground = ((foregroundIndex == null) ? defaultForeground :
-                     this.colorPalette[foregroundIndex]);
+		     this.colorPalette[foregroundIndex]);
   this.background = ((backgroundIndex == null) ? defaultBackground :
-                     this.colorPalette[backgroundIndex]);
+		     this.colorPalette[backgroundIndex]);
 };
 
 /**
@@ -260,10 +271,10 @@ hterm.TextAttributes.containersMatch = function(obj1, obj2) {
   var style2 = obj2.style;
 
   return (style1.color == style2.color &&
-          style1.backgroundColor == style2.backgroundColor &&
-          style1.fontWeight == style2.fontWeight &&
-          style1.fontStyle == style2.fontStyle &&
-          style1.textDecoration == style2.textDecoration);
+	  style1.backgroundColor == style2.backgroundColor &&
+	  style1.fontWeight == style2.fontWeight &&
+	  style1.fontStyle == style2.fontStyle &&
+	  style1.textDecoration == style2.textDecoration);
 };
 
 /**

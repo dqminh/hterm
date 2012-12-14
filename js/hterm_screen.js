@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.f',
+	  'hterm.RowCol', 'hterm.Size', 'hterm.TextAttributes');
+
 /**
  * @fileoverview This class represents a single terminal screen full of text.
  *
@@ -103,10 +108,8 @@ hterm.Screen.prototype.getWidth = function() {
 hterm.Screen.prototype.setColumnCount = function(count) {
   this.columnCount_ = count;
 
-  if (this.cursorPosition.column >= count) {
-    this.setCursorPosition(this.cursorPosition.row,
-                           this.cursorPosition.column - 1);
-  }
+  if (this.cursorPosition.column >= count)
+    this.setCursorPosition(this.cursorPosition.row, count - 1);
 };
 
 /**
@@ -239,38 +242,41 @@ hterm.Screen.prototype.invalidateCursorPosition = function() {
 };
 
 /**
- * Clear the contents of a selected row.
- *
- * TODO: Make this clear in the current style... somehow.  We can't just
- * fill the row with spaces, since they would have potential to mess up the
- * terminal (for example, in insert mode, they might wrap around to the next
- * line.
- *
- * @param {integer} index The zero-based index to clear.
- */
-hterm.Screen.prototype.clearRow = function(index) {
-  if (index == this.cursorPosition.row) {
-    this.clearCursorRow();
-  } else {
-    var row = this.rowsArray[index];
-    row.innerHTML = '';
-    row.appendChild(row.ownerDocument.createTextNode(''));
-  }
-};
-
-/**
  * Clear the contents of the cursor row.
- *
- * TODO: Same comment as clearRow().
  */
 hterm.Screen.prototype.clearCursorRow = function() {
   this.cursorRowNode_.innerHTML = '';
-  var text = this.cursorRowNode_.ownerDocument.createTextNode('');
-  this.cursorRowNode_.appendChild(text);
+  this.cursorRowNode_.removeAttribute('line-overflow');
   this.cursorOffset_ = 0;
-  this.cursorNode_ = text;
   this.cursorPosition.column = 0;
   this.cursorPosition.overflow = false;
+
+  var text;
+  if (this.textAttributes.isDefault()) {
+    text = '';
+  } else {
+    text = lib.f.getWhitespace(this.columnCount_);
+  }
+
+  var node = this.textAttributes.createContainer(text);
+  this.cursorRowNode_.appendChild(node);
+  this.cursorNode_ = node;
+};
+
+/**
+ * Mark the current row as having overflowed to the next line.
+ *
+ * The line overflow state is used when converting a range of rows into text.
+ * It makes it possible to recombine two or more overflow terminal rows into
+ * a single line.
+ *
+ * This is distinct from the cursor being in the overflow state.  Cursor
+ * overflow indicates that printing at the cursor position will commit a
+ * line overflow, unless it is preceded by a repositioning of the cursor
+ * to a non-overflow state.
+ */
+hterm.Screen.prototype.commitLineOverflow = function() {
+  this.cursorRowNode_.setAttribute('line-overflow', true);
 };
 
 /**
@@ -286,18 +292,18 @@ hterm.Screen.prototype.setCursorPosition = function(row, column) {
   }
 
   if (row >= this.rowsArray.length) {
-    console.warn('Row out of bounds: ' + row, hterm.getStack(1));
+    console.error('Row out of bounds: ' + row);
     row = this.rowsArray.length - 1;
   } else if (row < 0) {
-    console.warn('Row out of bounds: ' + row, hterm.getStack(1));
+    console.error('Row out of bounds: ' + row);
     row = 0;
   }
 
   if (column >= this.columnCount_) {
-    console.log('Column out of bounds: ' + column, hterm.getStack(1));
+    console.error('Column out of bounds: ' + column);
     column = this.columnCount_ - 1;
   } else if (column < 0) {
-    console.log('Column out of bounds: ' + column, hterm.getStack(1));
+    console.error('Column out of bounds: ' + column);
     column = 0;
   }
 
@@ -341,12 +347,10 @@ hterm.Screen.prototype.setCursorPosition = function(row, column) {
 /**
  * Set the provided selection object to be a caret selection at the current
  * cursor position.
- *
- * TODO: somehow this is broken in firefox ...
  */
 hterm.Screen.prototype.syncSelectionCaret = function(selection) {
-  //console.log(selection, this.cursorNode_, this.cursorOffset_);
-  //selection.collapse(this.cursorNode_, this.cursorOffset_);
+  // TODO: somehow this is broken in firefox
+  // selection.collapse(this.cursorNode_, this.cursorOffset_);
 };
 
 /**
@@ -376,85 +380,60 @@ hterm.Screen.prototype.splitNode_ = function(node, offset) {
 };
 
 /**
- * Remove and return all content past the end of the current cursor position.
- *
- * If necessary, the cursor's current node will be split.  Everything past
- * the end of the cursor will be returned in an array.  Any empty nodes
- * will be omitted from the result array.  If the resulting array is empty,
- * this function will return null.
- *
- * @return {Array} An array of DOM nodes that used to appear after the cursor,
- *     or null if the cursor was already at the end of the line.
+ * Ensure that text is clipped and the cursor is clamped to the column count.
  */
-hterm.Screen.prototype.clipAtCursor_ = function() {
-  if (this.cursorOffset_ < this.cursorNode_.textContent.length - 1)
-    this.splitNode_(this.cursorNode_, this.cursorOffset_ + 1);
+hterm.Screen.prototype.maybeClipCurrentRow = function() {
+  if (this.cursorRowNode_.textContent.length <= this.columnCount_) {
+    // Current row does not need clipping, but may need clamping.
+    if (this.cursorPosition.column >= this.columnCount_) {
+      this.setCursorPosition(this.cursorPosition.row, this.columnCount_ - 1);
+      this.cursorPosition.overflow = true;
+    }
 
-  var rv = null;
+    return;
+  }
+
+  // Save off the current column so we can maybe restore it later.
+  var currentColumn = this.cursorPosition.column;
+
+  // Move the cursor to the final column.
+  this.setCursorPosition(this.cursorPosition.row, this.columnCount_ - 1);
+
+  // Remove any text that partially overflows.
+  var cursorNodeText = this.cursorNode_.textContent;
+  if (this.cursorOffset_ < cursorNodeText.length - 1) {
+    this.cursorNode_.textContent = cursorNodeText.substr(
+	0, this.cursorOffset_ + 1);
+  }
+
+  // Remove all nodes after the cursor.
   var rowNode = this.cursorRowNode_;
   var node = this.cursorNode_.nextSibling;
 
   while (node) {
-    var length = node.textContent.length;
-    if (length) {
-      if (rv) {
-        rv.push(node);
-        rv.characterLength += length;
-      } else {
-        rv = [node];
-        rv.characterLength = length;
-      }
-    }
-
     rowNode.removeChild(node);
     node = this.cursorNode_.nextSibling;
   }
 
-  return rv;
-};
-
-/**
- * Ensure that the current row does not overflow the current column count.
- *
- * If the current row is too long, it will be clipped.  Text before the cursor
- * will be returned as an array of DOM nodes to overflow.  If there is nothing
- * to overflow, this function returns null.
- *
- * Note that text after the cursor is simply clipped and never overflowed.
- * Text that overflows the margin because it is offset during insert mode is
- * NOT wrapped.  However, new text printed as part of the insert IS wrapped.
- *
- * @return {Array} An array of DOM nodes that overflowed in the current row,
- *     or null if there is nothing to overflow.
- */
-hterm.Screen.prototype.maybeClipCurrentRow = function() {
-  var currentColumn = this.cursorPosition.column;
-
-  if (currentColumn >= this.columnCount_) {
-    // Text to the right of the cursor does not wrap.
-    this.deleteChars(this.cursorRowNode_.textContent.length);
-    // Now clip the parts we want to wrap.
-    this.setCursorPosition(this.cursorPosition.row, this.columnCount_ - 1);
-    this.cursorPosition.overflow = true;
-    return this.clipAtCursor_();
-  }
-
-  if (this.cursorRowNode_.textContent.length > this.columnCount_) {
-    // Text to the right of the cursor does not wrap.
-    this.setCursorPosition(this.cursorPosition.row, this.columnCount_ - 1);
-    this.clipAtCursor_();
+  if (currentColumn < this.columnCount_) {
+    // If the cursor was within the screen before we started then restore its
+    // position.
     this.setCursorPosition(this.cursorPosition.row, currentColumn);
-    return null;
+  } else {
+    // Otherwise leave it at the the last column in the overflow state.
+    this.cursorPosition.overflow = true;
   }
-
-  return null;
 };
 
 /**
  * Insert a string at the current character position using the current
  * text attributes.
  *
- * You must call maybeClipCurrentRow() after in order to check overflow.
+ * You must call maybeClipCurrentRow() after in order to clip overflowed
+ * text and clamp the cursor.
+ *
+ * It is also up to the caller to properly maintain the line overflow state
+ * using hterm.Screen..commitLineOverflow().
  */
 hterm.Screen.prototype.insertString = function(str) {
   var cursorNode = this.cursorNode_;
@@ -479,7 +458,7 @@ hterm.Screen.prototype.insertString = function(str) {
     // A negative reverse offset means the cursor is positioned past the end
     // of the characters on this line.  We'll need to insert the missing
     // whitespace.
-    var ws = hterm.getWhitespace(-reverseOffset);
+    var ws = lib.f.getWhitespace(-reverseOffset);
 
     // This whitespace should be completely unstyled.  Underline and background
     // color would be visible on whitespace, so we can't use one of those
@@ -489,8 +468,8 @@ hterm.Screen.prototype.insertString = function(str) {
       // original string.
       str = ws + str;
     } else if (cursorNode.nodeType == 3 ||
-               !(cursorNode.style.textDecoration ||
-                 cursorNode.style.backgroundColor)) {
+	       !(cursorNode.style.textDecoration ||
+		 cursorNode.style.backgroundColor)) {
       // Second best case, the current node is able to hold the whitespace.
       cursorNode.textContent = (cursorNodeText += ws);
     } else {
@@ -514,7 +493,7 @@ hterm.Screen.prototype.insertString = function(str) {
       cursorNode.textContent = str + cursorNodeText;
     } else {
       cursorNode.textContent = cursorNodeText.substr(0, offset) + str +
-          cursorNodeText.substr(offset);
+	  cursorNodeText.substr(offset);
     }
 
     this.cursorOffset_ += strLength;
@@ -529,7 +508,7 @@ hterm.Screen.prototype.insertString = function(str) {
     // At the beginning of the cursor node, the check the previous sibling.
     var previousSibling = cursorNode.previousSibling;
     if (previousSibling &&
-        this.textAttributes.matchesContainer(previousSibling)) {
+	this.textAttributes.matchesContainer(previousSibling)) {
       previousSibling.textContent += str;
       this.cursorNode_ = previousSibling;
       this.cursorOffset_ = previousSibling.textContent.length;
@@ -547,7 +526,7 @@ hterm.Screen.prototype.insertString = function(str) {
     // At the end of the cursor node, the check the next sibling.
     var nextSibling = cursorNode.nextSibling;
     if (nextSibling &&
-        this.textAttributes.matchesContainer(nextSibling)) {
+	this.textAttributes.matchesContainer(nextSibling)) {
       nextSibling.textContent = str + nextSibling.textContent;
       this.cursorNode_ = nextSibling;
       this.cursorOffset_ = strLength;
@@ -573,37 +552,14 @@ hterm.Screen.prototype.insertString = function(str) {
 };
 
 /**
- * Insert an array of DOM nodes at the beginning of the cursor row.
- *
- * This does not pay attention to the cursor column, it only prepends to the
- * beginning of the current row.
- *
- * This method does not attempt to coalesce rows of the same style.  It assumes
- * that the rows being inserted have already been coalesced, and that there
- * would be no gain in coalescing only the final node.
- *
- * The cursor will be reset to the zero'th column.
- */
-hterm.Screen.prototype.prependNodes = function(ary) {
-  var parentNode = this.cursorRowNode_;
-
-  for (var i = ary.length - 1; i >= 0; i--) {
-    parentNode.insertBefore(ary[i], parentNode.firstChild);
-  }
-
-  // We have to leave the cursor in a sensible state so we don't confuse
-  // setCursorPosition.  It's fastest to just leave it at the start of
-  // the row.  If the caller wants it somewhere else, they can move it
-  // on their own.
-  this.cursorPosition.column = 0;
-  this.cursorNode_ = parentNode.firstChild;
-  this.cursorOffset_ = 0;
-};
-
-/**
  * Overwrite the text at the current cursor position.
  *
- * You must call maybeClipCurrentRow() after in order to check overflow.
+ *
+ * You must call maybeClipCurrentRow() after in order to clip overflowed
+ * text and clamp the cursor.
+ *
+ * It is also up to the caller to properly maintain the line overflow state
+ * using hterm.Screen..commitLineOverflow().
  */
 hterm.Screen.prototype.overwriteString = function(str) {
   var maxLength = this.columnCount_ - this.cursorPosition.column;
@@ -630,23 +586,27 @@ hterm.Screen.prototype.overwriteString = function(str) {
  *
  * @param {integer} count The number of characters to delete.  This is clamped
  *     to the column width minus the cursor column.
+ * @return {integer} The number of characters actually deleted.
  */
 hterm.Screen.prototype.deleteChars = function(count) {
   var node = this.cursorNode_;
   var offset = this.cursorOffset_;
+  var textContent = node.textContent;
 
-  if (node.textContent.length <= offset && !node.nextSibling) {
-    // There's nothing after this node/offset to delete, buh bye.
-    return;
-  }
+  var currentCursorColumn = this.cursorPosition.column;
+  count = Math.min(count, this.columnCount_ - currentCursorColumn);
+  if (!count)
+    return 0;
+
+  var rv = count;
 
   while (node && count) {
-    var startLength = node.textContent.length;
+    var startLength = textContent.length;
 
-    node.textContent = node.textContent.substr(0, offset) +
-        node.textContent.substr(offset + count);
+    textContent = textContent.substr(0, offset) +
+	textContent.substr(offset + count);
 
-    var endLength = node.textContent.length;
+    var endLength = textContent.length;
     count -= startLength - endLength;
 
     if (endLength == 0 && node != this.cursorNode_) {
@@ -654,9 +614,15 @@ hterm.Screen.prototype.deleteChars = function(count) {
       node.parentNode.removeChild(node);
       node = nextNode;
     } else {
+      node.textContent = textContent;
       node = node.nextSibling;
     }
 
+    if (node)
+      textContent = node.textContent;
+
     offset = 0;
   }
+
+  return rv;
 };

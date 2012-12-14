@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-hterm.ScrollPort.Tests = new TestManager.Suite('hterm.ScrollPort.Tests');
+'use strict';
+
+hterm.ScrollPort.Tests = new lib.TestManager.Suite('hterm.ScrollPort.Tests');
 
 hterm.ScrollPort.Tests.prototype.setup = function(cx) {
   this.setDefaults(cx,
       { visibleColumnCount: 80,
-        visibleRowCount: 25,
-        totalRowCount: 10000
+	visibleRowCount: 25,
+	totalRowCount: 10000
       });
 
   var document = cx.window.document;
@@ -26,7 +28,7 @@ hterm.ScrollPort.Tests.prototype.setup = function(cx) {
   this.scrollPort = new hterm.ScrollPort(this.rowProvider);
   this.scrollPort.decorate(div);
   div.style.height = (this.scrollPort.characterSize.height *
-                      this.visibleRowCount + 1 + 'px');
+		      this.visibleRowCount + 1 + 'px');
   this.scrollPort.resize();
 };
 
@@ -53,14 +55,14 @@ hterm.ScrollPort.Tests.addTest('basic-scroll', function(result, cx) {
     var topRow = this.scrollPort.getTopRowIndex();
     result.assertEQ(topRow, 0);
     result.assertEQ(this.scrollPort.getBottomRowIndex(topRow),
-                    this.visibleRowCount - 1);
+		    this.visibleRowCount - 1);
 
     this.scrollPort.scrollRowToBottom(this.totalRowCount);
     topRow = this.scrollPort.getTopRowIndex();
     result.assertEQ(topRow,
-                    this.totalRowCount - this.visibleRowCount);
+		    this.totalRowCount - this.visibleRowCount);
     result.assertEQ(this.scrollPort.getBottomRowIndex(topRow),
-                    this.totalRowCount - 1);
+		    this.totalRowCount - 1);
 
     result.pass();
   });
@@ -111,7 +113,7 @@ hterm.ScrollPort.Tests.addTest('scroll-selection', function(result, cx) {
     s.collapse(anchorNode, 0);
 
     var focusRow = this.rowProvider.getRowNode(55 + this.visibleRowCount - 10);
-    focusNode = focusRow;
+    var focusNode = focusRow;
     while (focusNode.lastChild)
       focusNode = focusNode.lastChild;
     s.extend(focusNode, focusNode.length || 0);
@@ -138,9 +140,9 @@ hterm.ScrollPort.Tests.addTest('scroll-selection', function(result, cx) {
  */
 hterm.ScrollPort.Tests.addTest('select-all', function(result, cx) {
     this.scrollPort.selectAll();
-    result.assertEQ(0, this.scrollPort.selection_.startRow.rowIndex);
+    result.assertEQ(0, this.scrollPort.selection.startRow.rowIndex);
     result.assertEQ(this.totalRowCount - 1,
-                    this.scrollPort.selection_.endRow.rowIndex);
+		    this.scrollPort.selection.endRow.rowIndex);
     result.pass();
   });
 
@@ -165,7 +167,7 @@ hterm.ScrollPort.Tests.addTest('fullscreen', function(result, cx) {
     document.body.appendChild(div);
 
     this.scrollPort = new hterm.ScrollPort(this.rowProvider,
-                                           this.fontSize, this.lineHeight);
+					   this.fontSize, this.lineHeight);
     this.scrollPort.decorate(div);
 
     cx.window.scrollPort = this.scrollPort;

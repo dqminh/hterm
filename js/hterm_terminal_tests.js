@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * @fileoverview hterm.Terminal unit tests.
  */
 
-hterm.Terminal.Tests = new TestManager.Suite('hterm.Terminal.Tests');
+hterm.Terminal.Tests = new lib.TestManager.Suite('hterm.Terminal.Tests');
 
 hterm.Terminal.Tests.prototype.setup = function(cx) {
   this.setDefaults(cx,
       { visibleColumnCount: 80,
-        visibleRowCount: 24,
+	visibleRowCount: 24,
       });
 };
 
@@ -52,23 +54,23 @@ hterm.Terminal.Tests.addTest = function(name, callback) {
   function testProxy(result, cx) {
     var self = this;
     setTimeout(function() {
-        self.terminal.setCursorPosition(0, 0);
-        callback.apply(self, [result, cx]);
+	self.terminal.setCursorPosition(0, 0);
+	callback.apply(self, [result, cx]);
       }, 0);
 
     result.requestTime(200);
   }
 
-  TestManager.Suite.addTest.apply(this, [name, testProxy]);
+  lib.TestManager.Suite.addTest.apply(this, [name, testProxy]);
 };
 
 hterm.Terminal.Tests.addTest('dimensions', function(result, cx) {
     result.assertEQ((this.div.clientWidth - this.terminal.scrollbarWidthPx) /
-                    this.terminal.scrollPort_.characterSize.width,
-                    this.visibleColumnCount);
+		    this.terminal.scrollPort_.characterSize.width,
+		    this.visibleColumnCount);
     result.assertEQ(this.div.clientHeight /
-                    this.terminal.scrollPort_.characterSize.height,
-                    this.visibleRowCount);
+		    this.terminal.scrollPort_.characterSize.height,
+		    this.visibleRowCount);
 
     result.assertEQ(this.terminal.screen_.getWidth(), this.visibleColumnCount);
     result.assertEQ(this.terminal.screen_.getHeight(), this.visibleRowCount);
@@ -81,11 +83,11 @@ hterm.Terminal.Tests.addTest('dimensions', function(result, cx) {
  * that should stress the cursor positioning code.
  */
 hterm.Terminal.Tests.addTest('plaintext-stress-cursor-ltr',
-                             function(result, cx) {
+			     function(result, cx) {
     for (var col = 0; col < this.visibleColumnCount; col++) {
       for (var row = 0; row < this.visibleRowCount; row++) {
-        this.terminal.screen_.setCursorPosition(row, col);
-        this.terminal.screen_.insertString('X');
+	this.terminal.screen_.setCursorPosition(row, col);
+	this.terminal.screen_.insertString('X');
       }
     }
 
@@ -98,11 +100,11 @@ hterm.Terminal.Tests.addTest('plaintext-stress-cursor-ltr',
  * code.
  */
 hterm.Terminal.Tests.addTest('plaintext-stress-cursor-rtl',
-                             function(result, cx) {
+			     function(result, cx) {
     for (var col = this.visibleColumnCount - 1; col >= 0; col--) {
       for (var row = 0; row < this.visibleRowCount; row++) {
-        this.terminal.screen_.setCursorPosition(row, col);
-        this.terminal.screen_.overwriteString('X');
+	this.terminal.screen_.setCursorPosition(row, col);
+	this.terminal.screen_.overwriteString('X');
       }
     }
 
@@ -116,24 +118,24 @@ hterm.Terminal.Tests.addTest('plaintext-stress-cursor-rtl',
  * log is useful.
  */
 hterm.Terminal.Tests.addTest('plaintext-stress-insert',
-                             function(result, cx) {
+			     function(result, cx) {
     var chunkSize = 1000;
     var testCount = 10;
     var self = this;
 
     function test(count) {
       for (var i = count * chunkSize; i < (count + 1) * chunkSize; i++) {
-        if (i != 0)
-          self.terminal.newLine();
-        self.terminal.screen_.insertString(
-            'line ' + i + ': All work and no play makes jack a dull boy.');
+	if (i != 0)
+	  self.terminal.newLine();
+	self.terminal.screen_.insertString(
+	    'line ' + i + ': All work and no play makes jack a dull boy.');
       }
 
       if (count + 1 >= testCount) {
-        result.pass();
+	result.pass();
       } else {
-        result.requestTime(200);
-        setTimeout(test, 0, count + 1);
+	result.requestTime(200);
+	setTimeout(test, 0, count + 1);
       }
     }
 

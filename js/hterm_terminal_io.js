@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.encodeUTF8');
+
 /**
  * Input/Output interface used by commands to communicate with the terminal.
  *
@@ -28,6 +32,29 @@ hterm.Terminal.IO = function(terminal) {
 
   // The IO object to restore on IO.pop().
   this.previousIO_ = null;
+};
+
+/**
+ * Open an frame in the current terminal window, pointed to the specified
+ * url.
+ *
+ * Eventually we'll probably need size/position/decoration options.
+ * The user should also be able to move/resize the frame.
+ *
+ * @param {string} url The URL to load in the frame.
+ * @param {Object} opt_options Optional frame options.  Not implemented.
+ */
+hterm.Terminal.IO.prototype.createFrame = function(url, opt_options) {
+  return new hterm.Frame(this.terminal_, url, opt_options);
+};
+
+/**
+ * Change the preference profile for the terminal.
+ *
+ * @param profileName {string} The name of the preference profile to activate.
+ */
+hterm.Terminal.IO.prototype.setTerminalProfile = function(profileName) {
+  this.terminal_.setProfile(profileName);
 };
 
 /**
@@ -91,11 +118,11 @@ hterm.Terminal.IO.prototype.onTerminalResize = function(width, height) {
 };
 
 /**
- * Print a string to the terminal.
+ * Write a UTF-8 encoded byte string to the terminal.
  *
- * @param {string} string The string to print.
+ * @param {string} string The UTF-8 encoded string to print.
  */
-hterm.Terminal.IO.prototype.print = function(string) {
+hterm.Terminal.IO.prototype.writeUTF8 = function(string) {
   if (this.terminal_.io != this)
     throw 'Attempt to print from inactive IO object.';
 
@@ -103,10 +130,33 @@ hterm.Terminal.IO.prototype.print = function(string) {
 };
 
 /**
- * Print a string to the terminal followed by a newline.
+ * Write a UTF-8 encoded byte string to the terminal followed by crlf.
+ *
+ * @param {string} string The UTF-8 encoded string to print.
+ */
+hterm.Terminal.IO.prototype.writelnUTF8 = function(string) {
+  if (this.terminal_.io != this)
+    throw 'Attempt to print from inactive IO object.';
+
+  this.terminal_.interpret(string + '\r\n');
+};
+
+/**
+ * Write a UTF-16 JavaScript string to the terminal.
  *
  * @param {string} string The string to print.
  */
-hterm.Terminal.IO.prototype.println = function(string) {
-  this.terminal_.interpret(string + '\r\n');
+hterm.Terminal.IO.prototype.print =
+hterm.Terminal.IO.prototype.writeUTF16 = function(string) {
+  this.writeUTF8(lib.encodeUTF8(string));
+};
+
+/**
+ * Print a UTF-16 JavaScript string to the terminal followed by a newline.
+ *
+ * @param {string} string The string to print.
+ */
+hterm.Terminal.IO.prototype.println =
+hterm.Terminal.IO.prototype.writelnUTF16 = function(string) {
+  this.writelnUTF8(lib.encodeUTF8(string));
 };

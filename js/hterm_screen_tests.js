@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.f');
+
 /**
  * @fileoverview Unit tests for the hterm.Screen class.
  */
-hterm.Screen.Tests = new TestManager.Suite('hterm.Screen.Tests');
+hterm.Screen.Tests = new lib.TestManager.Suite('hterm.Screen.Tests');
 
 /**
  * Clear out the current document and create a new hterm.Screen object for
@@ -15,8 +19,8 @@ hterm.Screen.Tests = new TestManager.Suite('hterm.Screen.Tests');
  */
 hterm.Screen.Tests.prototype.preamble = function(result, cx) {
   cx.window.document.body.innerHTML = '';
-  cx.window_screen = this.screen = new hterm.Screen();
-  cx.window_screen.setColumnCount(80);
+  cx.window.screen = this.screen = new hterm.Screen();
+  cx.window.screen.setColumnCount(80);
 };
 
 /**
@@ -245,25 +249,22 @@ hterm.Screen.Tests.addTest('insert', function(result, cx) {
     result.assertEQ(ary[0].innerHTML, '   XXXXX');
 
     // Fetch enough whitespace to ensure that the row is full.
-    var ws = hterm.getWhitespace(this.screen.getWidth());
+    var ws = lib.f.getWhitespace(this.screen.getWidth());
 
-    // Check overflow. Two spaces overflow to the next line; only
-    // newly-inserted text overflows.
+    // Check text clipping and cursor clamping.
     this.screen.clearCursorRow();
     this.screen.insertString('XXXX');
     this.screen.setCursorPosition(0, 2);
     this.screen.insertString(ws);
-    var overflow = this.screen.maybeClipCurrentRow();
-    result.assertEQ(overflow.length, 1);
-    result.assertEQ(overflow[0].nodeType, 3);
-    result.assertEQ(overflow[0].textContent, '  ');
+    this.screen.maybeClipCurrentRow();
     result.assertEQ(ary[0].innerHTML, 'XX' + ws.substr(2));
+    result.assertEQ(this.screen.cursorPosition.column, 79);
 
     // Insert into a more complicated row.
     this.screen.setCursorPosition(1, 3);
     this.screen.insertString('XXXXX');
     result.assertEQ(ary[1].innerHTML, 'helXXXXXlo<div id="1"> </div>' +
-                    '<div id="2">world</div>');
+		    '<div id="2">world</div>');
 
     result.pass();
   });

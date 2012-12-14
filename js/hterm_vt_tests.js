@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.f');
+
 /**
  * @fileoverview VT test suite.
  *
@@ -10,12 +14,12 @@
  * the terminal to verify that everyone did the right thing.
  */
 
-hterm.VT.Tests = new TestManager.Suite('hterm.VT.Tests');
+hterm.VT.Tests = new lib.TestManager.Suite('hterm.VT.Tests');
 
 hterm.VT.Tests.prototype.setup = function(cx) {
   this.setDefaults(cx,
       { visibleColumnCount: 15,
-        visibleRowCount: 6,
+	visibleRowCount: 6,
       });
 };
 
@@ -66,15 +70,15 @@ hterm.VT.Tests.addTest = function(name, callback) {
   function testProxy(result, cx) {
     var self = this;
     setTimeout(function() {
-        self.terminal.setCursorPosition(0, 0);
-        self.terminal.setCursorVisible(true);
-        callback.apply(self, [result, cx]);
+	self.terminal.setCursorPosition(0, 0);
+	self.terminal.setCursorVisible(true);
+	callback.apply(self, [result, cx]);
       }, 0);
 
     result.requestTime(200);
   }
 
-  TestManager.Suite.addTest.apply(this, [name, testProxy]);
+  lib.TestManager.Suite.addTest.apply(this, [name, testProxy]);
 };
 
 /**
@@ -83,12 +87,64 @@ hterm.VT.Tests.addTest = function(name, callback) {
  */
 hterm.VT.Tests.addTest('sanity', function(result, cx) {
     this.terminal.interpret('0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n' +
-                            '7\r\n8\r\n9\r\n10\r\n11\r\n12');
+			    '7\r\n8\r\n9\r\n10\r\n11\r\n12');
 
     var text = this.terminal.getRowsText(0, 13);
     result.assertEQ(text, '0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12');
 
     result.assertEQ(this.terminal.scrollbackRows_.length, 7);
+
+    result.pass();
+  });
+
+/**
+ * Test that we parse UTF-8 properly. Parser state should persist
+ * across writes and invalid sequences should result in replacement
+ * characters.
+ */
+hterm.VT.Tests.addTest('utf8', function(result, cx) {
+    // 11100010 10000000 10011001 split over two writes.
+    this.terminal.interpret('\xe2\x80');
+    this.terminal.interpret('\x99\r\n');
+
+    // Interpret some invalid UTF-8. xterm and gnome-terminal are
+    // inconsistent about the number of replacement characters. We
+    // match xterm.
+    this.terminal.interpret('a\xf1\x80\x80\xe1\x80\xc2b\x80c\x80\xbfd\r\n')
+
+    // Surrogate pairs turn into replacements.
+    this.terminal.interpret('\xed\xa0\x80' +  // D800
+			    '\xed\xad\xbf' +  // D87F
+			    '\xed\xae\x80' +  // DC00
+			    '\xed\xbf\xbf');  // DFFF
+
+    var text = this.terminal.getRowsText(0, 3);
+    result.assertEQ(text,
+		    '\u2019\n' +
+		    'a\ufffd\ufffd\ufffdb\ufffdc\ufffd\ufffdd\n' +
+		    '\ufffd\ufffd\ufffd\ufffd');
+
+
+    // Check the upper and lower bounds of each sequence type. The
+    // last few will turn into single replacement characters. Some may
+    // require surrogate pairs in UTF-16. Run these through the
+    // decoder directly because the terminal ignores 00 and 7F.
+    result.assertEQ(
+      new lib.UTF8Decoder().decode('\x00' +
+				   '\xc2\x80' +
+				   '\xe0\xa0\x80' +
+				   '\xf0\x90\x80\x80' +
+				   '\xf8\x88\x80\x80\x80' +
+				   '\xfc\x84\x80\x80\x80\x80'),
+      '\u0000\u0080\u0800\ud800\udc00\ufffd\ufffd');
+    result.assertEQ(
+      new lib.UTF8Decoder().decode('\x7f' +
+				   '\xdf\xbf' +
+				   '\xef\xbf\xbf' +
+				   '\xf7\xbf\xbf\xbf' +
+				   '\xfb\xbf\xbf\xbf\xbf' +
+				   '\xfd\xbf\xbf\xbf\xbf\xbf'),
+      '\u007f\u07ff\uffff\ufffd\ufffd\ufffd');
 
     result.pass();
   });
@@ -101,11 +157,11 @@ hterm.VT.Tests.addTest('sanity', function(result, cx) {
 hterm.VT.Tests.addTest('cursor-relative', function(result, cx) {
     this.terminal.interpret('line 1\r\nline 2\r\nline 3');
     this.terminal.interpret('\x1b[A\x1b[Dtwo' +
-                            '\x1b[3D' +
-                            '\x1b[Aone' +
-                            '\x1b[4D' +
-                            '\x1b[2B' +
-                            '\x1b[Cthree');
+			    '\x1b[3D' +
+			    '\x1b[Aone' +
+			    '\x1b[4D' +
+			    '\x1b[2B' +
+			    '\x1b[Cthree');
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text, 'line one\nline two\nline three');
     result.pass();
@@ -118,8 +174,8 @@ hterm.VT.Tests.addTest('cursor-absolute', function(result, cx) {
     this.terminal.interpret('line 1\r\nline 2\r\nline 3');
 
     this.terminal.interpret('\x1b[1Gline three' +
-                            '\x1b[2;6Htwo' +
-                            '\x1b[1;5f one');
+			    '\x1b[2;6Htwo' +
+			    '\x1b[1;5f one');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text, 'line one\nline two\nline three');
@@ -134,8 +190,8 @@ hterm.VT.Tests.addTest('line-position', function(result, cx) {
     this.terminal.interpret('line 1\r\nline 2\r\nline 3');
 
     this.terminal.interpret('\x1b[Fline two' +
-                            '\x1b[Fline one' +
-                            '\x1b[E\x1b[Eline three');
+			    '\x1b[Fline one' +
+			    '\x1b[E\x1b[Eline three');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text, 'line one\nline two\nline three');
@@ -188,8 +244,10 @@ hterm.VT.Tests.addTest('8-bit-control', function(result, cx) {
 
     result.assertEQ(this.terminal.vt.enable8BitControl, false);
 
-    // Send a "set window title" command using a disabled 8-bit control.
-    this.terminal.interpret('\x9d0;test title\x07!!');
+    // Send a "set window title" command using a disabled 8-bit
+    // control. It's a C1 control, so we interpret it after UTF-8
+    // decoding.
+    this.terminal.interpret('\xc2\x9d0;test title\x07!!');
 
     result.assertEQ(title, null);
     result.assertEQ(this.terminal.getRowsText(0, 1), '0;test title!!');
@@ -205,7 +263,7 @@ hterm.VT.Tests.addTest('8-bit-control', function(result, cx) {
     title = null;
     this.terminal.reset();
     this.terminal.vt.enable8BitControl = true;
-    this.terminal.interpret('\x9d0;test title\x07!!');
+    this.terminal.interpret('\xc2\x9d0;test title\x07!!');
     result.assertEQ(title, 'test title');
     result.assertEQ(this.terminal.getRowsText(0, 1), '!!');
 
@@ -259,12 +317,12 @@ hterm.VT.Tests.addTest('dec-screen-test', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 6);
     result.assertEQ(text,
-                    'EEEEEEEEEEEEEEE\n' +
-                    'EEEEEEEEEEEEEEE\n' +
-                    'EEEEEEEEEEEEEEE\n' +
-                    'EEEEEEEEEEEEEEE\n' +
-                    'EEEEEEEEEEEEEEE\n' +
-                    'EEEEEEEEEEEEEEE');
+		    'EEEEEEEEEEEEEEE\n' +
+		    'EEEEEEEEEEEEEEE\n' +
+		    'EEEEEEEEEEEEEEE\n' +
+		    'EEEEEEEEEEEEEEE\n' +
+		    'EEEEEEEEEEEEEEE\n' +
+		    'EEEEEEEEEEEEEEE');
     result.pass();
 
   });
@@ -277,10 +335,10 @@ hterm.VT.Tests.addTest('newlines-1', function(result, cx) {
     this.terminal.interpret('newline\x0dvtab\x0bff\x0cbye');
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'vtabine\n' +
-                    '    ff\n' +
-                    '      bye'
-                    );
+		    'vtabine\n' +
+		    '    ff\n' +
+		    '      bye'
+		    );
 
     result.pass();
   });
@@ -292,10 +350,10 @@ hterm.VT.Tests.addTest('newlines-2', function(result, cx) {
     this.terminal.interpret('newline\x0dvtab\x0bff\x0cbye');
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'vtabine\n' +
-                    'ff\n' +
-                    'bye'
-                    );
+		    'vtabine\n' +
+		    'ff\n' +
+		    'bye'
+		    );
 
     result.pass();
   });
@@ -312,13 +370,13 @@ hterm.VT.Tests.addTest('tabs', function(result, cx) {
     this.terminal.interpret('1\t2\te');
     var text = this.terminal.getRowsText(0, 6);
     result.assertEQ(text,
-                    '123456789012345\n' +
-                    '1       2     a\n' +
-                    '1       2     b\n' +
-                    '1       2     c\n' +
-                    '1       2     d\n' +
-                    '1       2     e'
-                    );
+		    '123456789012345\n' +
+		    '1       2     a\n' +
+		    '1       2     b\n' +
+		    '1       2     c\n' +
+		    '1       2     d\n' +
+		    '1       2     e'
+		    );
 
     result.pass();
   });
@@ -328,18 +386,18 @@ hterm.VT.Tests.addTest('tabs', function(result, cx) {
  */
 hterm.VT.Tests.addTest('reset', function(result, cx) {
     this.terminal.interpret(
-        // Switch to alternate screen and set some attributes.
-        '\x1b[?47h\x1b[1;33;44m' +
-        // Switch back to primary screen.
-        '\x1b[?47l' +
-        // Set some text attributes.
-        '\x1b[1;33;44m' +
-        // Clear all tab stops.
-        '\x1b[3g' +
-        // Set a scroll region.
-        '\x1b[2;4r' +
-        // Set cursor position.
-        '\x1b[5;6H');
+	// Switch to alternate screen and set some attributes.
+	'\x1b[?47h\x1b[1;33;44m' +
+	// Switch back to primary screen.
+	'\x1b[?47l' +
+	// Set some text attributes.
+	'\x1b[1;33;44m' +
+	// Clear all tab stops.
+	'\x1b[3g' +
+	// Set a scroll region.
+	'\x1b[2;4r' +
+	// Set cursor position.
+	'\x1b[5;6H');
 
     var ta;
 
@@ -389,13 +447,13 @@ hterm.VT.Tests.addTest('reset', function(result, cx) {
 hterm.VT.Tests.addTest('erase-left', function(result, cx) {
     this.terminal.interpret('line one\r\noooooooo\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[1Ktw');
+			    '\x1b[1Ktw');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    '     two\n' +
-                    'line three');
+		    'line one\n' +
+		    '     two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -405,13 +463,13 @@ hterm.VT.Tests.addTest('erase-left', function(result, cx) {
 hterm.VT.Tests.addTest('erase-right', function(result, cx) {
     this.terminal.interpret('line one\r\nline XXXX\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[0Ktwo');
+			    '\x1b[0Ktwo');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -421,13 +479,13 @@ hterm.VT.Tests.addTest('erase-right', function(result, cx) {
 hterm.VT.Tests.addTest('erase-line', function(result, cx) {
     this.terminal.interpret('line one\r\nline twoo\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[2Ktwo');
+			    '\x1b[2Ktwo');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    '     two\n' +
-                    'line three');
+		    'line one\n' +
+		    '     two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -437,13 +495,13 @@ hterm.VT.Tests.addTest('erase-line', function(result, cx) {
 hterm.VT.Tests.addTest('erase-above', function(result, cx) {
     this.terminal.interpret('line one\r\noooooooo\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[1Jtw');
+			    '\x1b[1Jtw');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    '\n' +
-                    '     two\n' +
-                    'line three');
+		    '\n' +
+		    '     two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -453,13 +511,13 @@ hterm.VT.Tests.addTest('erase-above', function(result, cx) {
 hterm.VT.Tests.addTest('erase-all', function(result, cx) {
     this.terminal.interpret('line one\r\nline XXXX\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[2Jtwo');
+			    '\x1b[2Jtwo');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    '\n' +
-                    '     two\n' +
-                    '');
+		    '\n' +
+		    '     two\n' +
+		    '');
     result.pass();
   });
 
@@ -469,13 +527,13 @@ hterm.VT.Tests.addTest('erase-all', function(result, cx) {
 hterm.VT.Tests.addTest('erase-below', function(result, cx) {
     this.terminal.interpret('line one\r\nline XXXX\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[0Jtwo');
+			    '\x1b[0Jtwo');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    '');
+		    'line one\n' +
+		    'line two\n' +
+		    '');
     result.pass();
   });
 
@@ -485,22 +543,22 @@ hterm.VT.Tests.addTest('erase-below', function(result, cx) {
 hterm.VT.Tests.addTest('erase-char', function(result, cx) {
     this.terminal.interpret('line one\r\nline XXXX\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[A' +
-                            '\x1b[4Xtwo');
+			    '\x1b[4Xtwo');
 
     var text = this.terminal.getRowsText(0, 3);
     // See TODO in hterm.Terminal.prototype.eraseToRight for the extra space.
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two \n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
 
     this.terminal.interpret('\x1b[3D' +
-                            '\x1b[X');
+			    '\x1b[X');
     text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line  wo \n' +
-                    'line three');
+		    'line one\n' +
+		    'line  wo\n' +
+		    'line three');
     result.pass();
   });
 
@@ -510,13 +568,13 @@ hterm.VT.Tests.addTest('erase-char', function(result, cx) {
 hterm.VT.Tests.addTest('insert-line', function(result, cx) {
     this.terminal.interpret('line two\r\nline three');
     this.terminal.interpret('\x1b[5D\x1b[2A\x1b[L' +
-                            'line one');
+			    'line one');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -526,13 +584,13 @@ hterm.VT.Tests.addTest('insert-line', function(result, cx) {
 hterm.VT.Tests.addTest('insert-lines', function(result, cx) {
     this.terminal.interpret('line three\r\n\r\n');
     this.terminal.interpret('\x1b[5D\x1b[2A\x1b[2L' +
-                            'line one\r\nline two');
+			    'line one\r\nline two');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -542,15 +600,15 @@ hterm.VT.Tests.addTest('insert-lines', function(result, cx) {
 hterm.VT.Tests.addTest('insert-toomany-lines', function(result, cx) {
     this.terminal.interpret('XXXXX');
     this.terminal.interpret('\x1b[6L' +
-                            'line one\r\nline two\r\nline three');
+			    'line one\r\nline two\r\nline three');
 
     var text = this.terminal.getRowsText(0, 5);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three\n' +
-                    '\n' +
-                    '');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three\n' +
+		    '\n' +
+		    '');
     result.pass();
   });
 
@@ -559,15 +617,15 @@ hterm.VT.Tests.addTest('insert-toomany-lines', function(result, cx) {
  */
 hterm.VT.Tests.addTest('delete-line', function(result, cx) {
     this.terminal.interpret('line one\r\nline two\r\n' +
-                            'XXXXXXXX\r\n' +
-                            'line XXXXX');
+			    'XXXXXXXX\r\n' +
+			    'line XXXXX');
     this.terminal.interpret('\x1b[5D\x1b[A\x1b[Mthree');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -576,15 +634,15 @@ hterm.VT.Tests.addTest('delete-line', function(result, cx) {
  */
 hterm.VT.Tests.addTest('delete-lines', function(result, cx) {
     this.terminal.interpret('line one\r\nline two\r\n' +
-                            'XXXXXXXX\r\nXXXXXXXX\r\n' +
-                            'line XXXXX');
+			    'XXXXXXXX\r\nXXXXXXXX\r\n' +
+			    'line XXXXX');
     this.terminal.interpret('\x1b[5D\x1b[2A\x1b[2Mthree');
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -597,9 +655,9 @@ hterm.VT.Tests.addTest('insert-space', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -612,9 +670,9 @@ hterm.VT.Tests.addTest('insert-spaces', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line   two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line   two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -627,9 +685,9 @@ hterm.VT.Tests.addTest('delete-chars', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -642,9 +700,9 @@ hterm.VT.Tests.addTest('delete-toomany', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -657,9 +715,9 @@ hterm.VT.Tests.addTest('scroll-up', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -672,11 +730,11 @@ hterm.VT.Tests.addTest('scroll-down', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 5);
     result.assertEQ(text,
-                    '\n' +
-                    'line one\n' +
-                    'line two\n' +
-                    'line three\n' +
-                    '     ');
+		    '\n' +
+		    'line one\n' +
+		    'line two\n' +
+		    'line three\n' +
+		    '     ');
     result.pass();
   });
 
@@ -691,9 +749,9 @@ hterm.VT.Tests.addTest('line-position-absolute', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
     result.pass();
   });
 
@@ -729,18 +787,18 @@ hterm.VT.Tests.disableTest('clear-all-tabstops', function(result, cx) {
  */
 hterm.VT.Tests.addTest('color-change', function(result, cx) {
     this.terminal.interpret('[mplain....... [0;36mHi\r\n' +
-                            '[mbright...... [0;96mHi\r\n' +
-                            '[mbold........ [1;36mHi\r\n' +
-                            '[mbold-bright. [1;96mHi\r\n' +
-                            '[mbright-bold. [96;1mHi');
+			    '[mbright...... [0;96mHi\r\n' +
+			    '[mbold........ [1;36mHi\r\n' +
+			    '[mbold-bright. [1;96mHi\r\n' +
+			    '[mbright-bold. [96;1mHi');
 
     var text = this.terminal.getRowsText(0, 5);
     result.assertEQ(text,
-                    'plain....... Hi\n' +
-                    'bright...... Hi\n' +
-                    'bold........ Hi\n' +
-                    'bold-bright. Hi\n' +
-                    'bright-bold. Hi');
+		    'plain....... Hi\n' +
+		    'bright...... Hi\n' +
+		    'bold........ Hi\n' +
+		    'bold-bright. Hi\n' +
+		    'bright-bold. Hi');
 
     for (var i = 0; i < 5; i++) {
       var row = this.terminal.getRowNode(i);
@@ -774,9 +832,9 @@ hterm.VT.Tests.addTest('status-report', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
 
     result.pass();
   });
@@ -872,15 +930,15 @@ hterm.VT.Tests.addTest('mode-bits', function(result, cx) {
     result.assertEQ(this.terminal.keyboard.altSendsEscape, false);
 
     result.assertEQ(this.terminal.screen_,
-                    this.terminal.primaryScreen_);
+		    this.terminal.primaryScreen_);
 
     this.terminal.interpret('\x1b[?1049h');
     result.assertEQ(this.terminal.screen_,
-                    this.terminal.alternateScreen_);
+		    this.terminal.alternateScreen_);
 
     this.terminal.interpret('\x1b[?1049l');
     result.assertEQ(this.terminal.screen_,
-                    this.terminal.primaryScreen_);
+		    this.terminal.primaryScreen_);
 
     result.pass();
   });
@@ -909,9 +967,9 @@ hterm.VT.Tests.addTest('insert-mode', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text,
-                    'line one\n' +
-                    'line two\n' +
-                    'line three');
+		    'line one\n' +
+		    'line two\n' +
+		    'line three');
 
     result.pass();
   });
@@ -923,21 +981,21 @@ hterm.VT.Tests.addTest('wraparound-mode-on', function(result, cx) {
     // Should be on by default.
     result.assertEQ(this.terminal.options_.wraparound, true);
 
-    this.terminal.interpret('-----  1  -----');
-    this.terminal.interpret('-----  2  -----');
-    this.terminal.interpret('-----  3  -----');
-    this.terminal.interpret('-----  4  -----');
-    this.terminal.interpret('-----  5  -----');
-    this.terminal.interpret('-----  6  -----');
+    this.terminal.interpret('-----  1  ----a');
+    this.terminal.interpret('-----  2  ----b');
+    this.terminal.interpret('-----  3  ----c');
+    this.terminal.interpret('-----  4  ----d');
+    this.terminal.interpret('-----  5  ----e');
+    this.terminal.interpret('-----  6  ----f');
 
     var text = this.terminal.getRowsText(0, 6);
     result.assertEQ(text,
-                    '-----  1  -----\n' +
-                    '-----  2  -----\n' +
-                    '-----  3  -----\n' +
-                    '-----  4  -----\n' +
-                    '-----  5  -----\n' +
-                    '-----  6  -----');
+		    '-----  1  ----a' +
+		    '-----  2  ----b' +
+		    '-----  3  ----c' +
+		    '-----  4  ----d' +
+		    '-----  5  ----e' +
+		    '-----  6  ----f');
 
     result.assertEQ(this.terminal.getCursorRow(), 5);
     result.assertEQ(this.terminal.getCursorColumn(), 14);
@@ -949,21 +1007,21 @@ hterm.VT.Tests.addTest('wraparound-mode-off', function(result, cx) {
     this.terminal.interpret('\x1b[?7l');
     result.assertEQ(this.terminal.options_.wraparound, false);
 
-    this.terminal.interpret('-----  1  -----');
-    this.terminal.interpret('-----  2  -----');
-    this.terminal.interpret('-----  3  -----');
-    this.terminal.interpret('-----  4  -----');
-    this.terminal.interpret('-----  5  -----');
-    this.terminal.interpret('-----  6  -----');
+    this.terminal.interpret('-----  1  ----a');
+    this.terminal.interpret('-----  2  ----b');
+    this.terminal.interpret('-----  3  ----c');
+    this.terminal.interpret('-----  4  ----d');
+    this.terminal.interpret('-----  5  ----e');
+    this.terminal.interpret('-----  6  ----f');
 
     var text = this.terminal.getRowsText(0, 6);
     result.assertEQ(text,
-                    '-----  1  -----\n' +
-                    '\n' +
-                    '\n' +
-                    '\n' +
-                    '\n' +
-                    '');
+		    '-----  1  ----f\n' +
+		    '\n' +
+		    '\n' +
+		    '\n' +
+		    '\n' +
+		    '');
 
     result.assertEQ(this.terminal.getCursorRow(), 0);
     result.assertEQ(this.terminal.getCursorColumn(), 14);
@@ -979,22 +1037,85 @@ hterm.VT.Tests.addTest('insert-wrap', function(result, cx) {
     result.assertEQ(this.terminal.options_.wraparound, true);
 
     this.terminal.interpret('' + // Insert off, wrap on (default).
-                            '[15GAAAA[1GXX\r\n' +
-                            '[4h[?7l' +  // Insert on, wrap off.
-                            '[15GAAAA[1GXX\r\n' +
-                            '[4h[?7h' +  // Insert on, wrap on.
-                            '[15GAAAA[1GXX\r\n' +
-                            '[4l[?7l' +  // Insert off, wrap off.
-                            '[15GAAAA[1GXX');
+			    '[15GAAAA[1GXX\r\n' +
+			    '[4h[?7l' +  // Insert on, wrap off.
+			    '[15GAAAA[1GXX\r\n' +
+			    '[4h[?7h' +  // Insert on, wrap on.
+			    '[15GAAAA[1GXX\r\n' +
+			    '[4l[?7l' +  // Insert off, wrap off.
+			    '[15GAAAA[1GXX');
+
+    result.assertEQ(this.terminal.getRowText(0), '              A');
+    result.assertEQ(this.terminal.getRowText(1), 'XXA');
+    result.assertEQ(this.terminal.getRowText(2), 'XX             ');
+    result.assertEQ(this.terminal.getRowText(3), '              A');
+    result.assertEQ(this.terminal.getRowText(4), 'XXAAA');
+    result.assertEQ(this.terminal.getRowText(5), 'XX            A');
+
+    result.pass();
+  });
+
+/**
+ * Test a line that is long enough to need to be wrapped more than once.
+ */
+hterm.VT.Tests.addTest('long-wrap', function(result, cx) {
+    var str = '';
+    for (var i = 0; i < this.visibleColumnCount * 3; i++)
+      str += 'X';
+
+    this.terminal.interpret(str);
+
+    result.assertEQ(this.terminal.getRowText(0), 'XXXXXXXXXXXXXXX');
+    result.assertEQ(this.terminal.getRowText(1), 'XXXXXXXXXXXXXXX');
+    result.assertEQ(this.terminal.getRowText(2), 'XXXXXXXXXXXXXXX');
+
+    result.pass();
+  });
+
+/**
+ * Test interactions between the cursor overflow bit and various
+ * escape sequences.
+ */
+hterm.VT.Tests.addTest('cursor-overflow', function(result, cx) {
+    // Should be on by default.
+    result.assertEQ(this.terminal.options_.wraparound, true);
+
+    // Fill a row with the last hyphen wrong, then run a command that
+    // modifies the screen, then add a hyphen. The wrap bit should be
+    // cleared, so the extra hyphen can fix the row.
+
+    this.terminal.interpret('-----  1  ----X');
+    this.terminal.interpret('\x1b[K-');  // EL
+
+    this.terminal.interpret('-----  2  ----X');
+    this.terminal.interpret('\x1b[J-');  // ED
+
+    this.terminal.interpret('-----  3  ----X');
+    this.terminal.interpret('\x1b[@-');  // ICH
+
+    this.terminal.interpret('-----  4  ----X');
+    this.terminal.interpret('\x1b[P-');  // DCH
+
+    this.terminal.interpret('-----  5  ----X');
+    this.terminal.interpret('\x1b[X-');  // ECH
+
+    // DL will delete the entire line but clear the wrap bit, so we
+    // expect a hyphen at the end and nothing else.
+    this.terminal.interpret('XXXXXXXXXXXXXXX');
+    this.terminal.interpret('\x1b[M-');  // DL
 
     var text = this.terminal.getRowsText(0, 6);
     result.assertEQ(text,
-                    '              A\n' +
-                    'XXA\n' +
-                    'XX             \n' +
-                    '              A\n' +
-                    'XXAAA\n' +
-                    'XX            A');
+		    '-----  1  -----' +
+		    '-----  2  -----' +
+		    '-----  3  -----' +
+		    '-----  4  -----' +
+		    '-----  5  -----' +
+		    '              -');
+
+    result.assertEQ(this.terminal.getCursorRow(), 5);
+    result.assertEQ(this.terminal.getCursorColumn(), 14);
+
     result.pass();
   });
 
@@ -1034,6 +1155,76 @@ hterm.VT.Tests.addTest('alternate-screen', function(result, cx) {
     result.pass();
   });
 
+/**
+ * Test that we can use OSC 52 to copy to the system clipboard.
+ */
+hterm.VT.Tests.addTest('OSC-52', function(result, cx) {
+    // Mock this out since we can't document.execCommand from the
+    // test harness.
+    hterm.copySelectionToClipboard = function(document) {
+      var s = document.getSelection();
+      result.assertEQ(s.anchorNode.textContent, 'copypasta!');
+      result.pass();
+    };
+
+    this.terminal.interpret('\x1b]52;c;Y29weXBhc3RhIQ==\x07');
+    result.requestTime(200);
+  });
+
+/**
+ * Test that OSC 52 works when large strings are split across multiple interpret
+ * calls.
+ */
+hterm.VT.Tests.addTest('OSC-52-big', function(result, cx) {
+    // Mock this out since we can't document.execCommand from the
+    // test harness.
+    hterm.copySelectionToClipboard = function(document) {
+      var s = document.getSelection();
+      result.assertEQ(s.anchorNode.textContent, expect);
+      result.pass();
+    };
+
+    var expect = '';
+    for (var i = 0; i < 996; i++) {
+      expect += 'x';
+    }
+
+    var encode = '';
+    for (var i = 0; i < expect.length / 6; i++) {
+      encode += 'eHh4';
+    }
+
+    this.terminal.vt.maxStringSequence = expect.length * 3;
+
+    this.terminal.interpret('\x1b]52;c;');
+    this.terminal.interpret(encode);
+    this.terminal.interpret(encode);
+    this.terminal.interpret('\x07');
+    result.requestTime(200);
+  });
+
+hterm.VT.Tests.addTest('OSC-4', function(result, cx) {
+    var resultString;
+
+    this.terminal.io.sendString = function(str) { resultString = str };
+    // Change the terminal palette, then read it back.
+    this.terminal.interpret('\x1b]4;1;rgb:0100/0100/0100;' +
+			    '2;rgb:beef/beef/beef\x07');
+    this.terminal.interpret('\x1b]4;1;?;2;?\x07');
+    // The values go through some normalization, so what we read isn't
+    // *exactly* what went in.
+    result.assertEQ(resultString, '\x1b]4;1;rgb:0101/0101/0101;' +
+		    '2;rgb:bebe/bebe/bebe\x07');
+
+    // Round trip the normalized values, to check that the normalization is
+    // idempotent.
+    this.terminal.interpret('\x1b]4;1;rgb:0101/0101/0101;2;' +
+			    'rgb:bebe/bebe/bebe\x07');
+    result.assertEQ(resultString, '\x1b]4;1;rgb:0101/0101/0101;' +
+		    '2;rgb:bebe/bebe/bebe\x07');
+    result.pass();
+  });
+
 hterm.VT.Tests.addTest('fullscreen', function(result, cx) {
     this.div.style.height = '100%';
     this.div.style.width = '100%';
@@ -1041,16 +1232,16 @@ hterm.VT.Tests.addTest('fullscreen', function(result, cx) {
     var self = this;
 
     setTimeout(function() {
-        for (var i = 0; i < 1000; i++) {
-          var indent = i % 40;
-          if (indent > 20)
-            indent = 40 - indent;
+	for (var i = 0; i < 1000; i++) {
+	  var indent = i % 40;
+	  if (indent > 20)
+	    indent = 40 - indent;
 
-          self.terminal.interpret('Line ' + hterm.zpad(i, 3) + ': ' +
-                                  hterm.getWhitespace(indent) + '*\n');
-        }
+	  self.terminal.interpret('Line ' + lib.f.zpad(i, 3) + ': ' +
+				  lib.f.getWhitespace(indent) + '*\n');
+	}
 
-        result.pass();
+	result.pass();
       }, 100);
 
     result.requestTime(200);

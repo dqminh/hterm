@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('lib.colors', 'lib.f', 'lib.UTF8Decoder',
+	  'hterm.VT.CharacterMap');
+
 /**
  * Constructor for the VT escape sequence interpreter.
  *
@@ -38,6 +43,12 @@ hterm.VT = function(terminal) {
    */
   this.terminal = terminal;
 
+  terminal.onMouse = this.onTerminalMouse_.bind(this);
+  this.mouseReport_ = this.MOUSE_REPORT_DISABLED;
+
+  // Parse state left over from the last parse.  You should use the parseState
+  // instance passed into your parse routine, rather than reading
+  // this.parseState_ directly.
   this.parseState_ = new hterm.VT.ParseState(this.parseUnknown_);
 
   // Any "leading modifiers" for the escape sequence, such as '?', ' ', or the
@@ -51,29 +62,20 @@ hterm.VT = function(terminal) {
   // Whether or not to respect the escape codes for setting terminal width.
   this.allowColumnWidthChanges_ = false;
 
+  // True if we should fake-out mouse "cell motion" reporting (DECSET 1002)
+  this.mouseCellMotionTrick_ = false;
+
   // Construct a regular expression to match the known one-byte control chars.
   // This is used in parseUnknown_ to quickly scan a string for the next
   // control character.
   var cc1 = Object.keys(hterm.VT.CC1).map(
       function(e) {
-        return '\\x' + hterm.zpad(e.charCodeAt().toString(16), 2)
+	return '\\x' + lib.f.zpad(e.charCodeAt().toString(16), 2)
       }).join('');
   this.cc1Pattern_ = new RegExp('[' + cc1 + ']');
 
-  // Regular expression used in UTF-8 decoding.
-  this.utf8Pattern_ = new RegExp(
-      [// 110x-xxxx 10xx-xxxx
-       '([\\xc0-\\xdf][\\x80-\\xbf])',
-       // 1110-xxxx 10xx-xxxx 10xx-xxxx
-       '([\\xe0-\\xef][\\x80-\\xbf]{2})',
-       // 1111-0xxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-       '([\\xf0-\\xf7][\\x80-\\xbf]{3})',
-       // 1111-10xx 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-       '([\\xf8-\\xfb][\\x80-\\xbf]{4})',
-       // 1111-110x 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-       '([\\xfc-\\xfd][\\x80-\\xbf]{5})'
-       ].join('|'),
-      'g');
+  // Decoder to maintain UTF-8 decode state.
+  this.utf8Decoder_ = new lib.UTF8Decoder();
 
   /**
    * Whether to accept the 8-bit control characters.
@@ -89,6 +91,11 @@ hterm.VT = function(terminal) {
   this.enable8BitControl = false;
 
   /**
+   * Whether to allow the OSC 52 sequence to write to the system clipboard.
+   */
+  this.enableClipboardWrite = true;
+
+  /**
    * Max length of an unterminated DCS, OSC, PM or APC sequence before we give
    * up and ignore the code.
    *
@@ -102,7 +109,76 @@ hterm.VT = function(terminal) {
    * sequence that we don't recognize or explicitly ignore.
    */
   this.warnUnimplemented = true;
+
+  /**
+   * The default G0...G3 character maps.
+   */
+  this.G0 = hterm.VT.CharacterMap.maps['B'];
+  this.G1 = hterm.VT.CharacterMap.maps['0'];
+  this.G2 = hterm.VT.CharacterMap.maps['B'];
+  this.G3 = hterm.VT.CharacterMap.maps['B'];
+
+  /**
+   * The 7-bit visible character set.
+   *
+   * This is a mapping from inbound data to display glyph.  The GL set
+   * contains the 94 bytes from 0x21 to 0x7e.
+   *
+   * The default GL set is 'B', US ASCII.
+   */
+  this.GL = 'G0';
+
+  /**
+   * The 8-bit visible character set.
+   *
+   * This is a mapping from inbound data to display glyph.  The GR set
+   * contains the 94 bytes from 0xa1 to 0xfe.
+   */
+  this.GR = 'G0';
+
+  // Saved state used in DECSC.
+  //
+  // This is a place to store a copy VT state, it is *not* the active state.
+  this.savedState_ = new hterm.VT.CursorState(this);
 };
+
+/**
+ * No mouse events.
+ */
+hterm.VT.prototype.MOUSE_REPORT_DISABLED = 0;
+
+/**
+ * DECSET mode 1000.
+ *
+ * Report mouse down/up events only.
+ */
+hterm.VT.prototype.MOUSE_REPORT_CLICK = 1;
+
+/**
+ * Report only mouse down events.
+ *
+ * This is an hterm specific mode that tricks vi's ':set mouse=a' mode into
+ * working more like emacs xterm-mouse-mode.  Clicks will reposition the
+ * cursor, and the scroll wheel will scroll the buffer.  Selection, however,
+ * will be browser-native, rather than the custom vi selection you usually get
+ * with ':set mouse=a'.
+ *
+ * When the 'mouse-cell-motion-trick' pref is enabled, we'll use this mode
+ * in place of MOUSE_REPORT_DRAG.
+ *
+ * It is distinct from the normal MOUSE_REPORT_CLICK so that we can switch it
+ * off if the user changes their 'mouse-cell-motion-trick' pref while this
+ * is enabled.  (If it weren't distinct, we wouldn't be sure how we got into
+ * MOUSE_REPORT_CLICK mode.)
+ */
+hterm.VT.prototype.MOUSE_REPORT_CLICK_1002 = 2;
+
+/**
+ * DECSET mode 1002.
+ *
+ * Report mouse down/up and movement while a button is down.
+ */
+hterm.VT.prototype.MOUSE_REPORT_DRAG = 3;
 
 /**
  * ParseState constructor.
@@ -221,6 +297,160 @@ hterm.VT.ParseState.prototype.isComplete = function() {
   return this.buf == null || this.buf.length <= this.pos;
 };
 
+hterm.VT.CursorState = function(vt) {
+  this.vt_ = vt;
+  this.save();
+};
+
+hterm.VT.CursorState.prototype.save = function() {
+  this.cursor = this.vt_.terminal.saveCursor();
+
+  this.textAttributes = this.vt_.terminal.getTextAttributes().clone();
+
+  this.GL = this.vt_.GL;
+  this.GR = this.vt_.GR;
+
+  this.G0 = this.vt_.G0;
+  this.G1 = this.vt_.G1;
+  this.G2 = this.vt_.G2;
+  this.G3 = this.vt_.G3;
+};
+
+hterm.VT.CursorState.prototype.restore = function() {
+  this.vt_.terminal.restoreCursor(this.cursor);
+
+  this.vt_.terminal.setTextAttributes(this.textAttributes.clone());
+
+  this.vt_.GL = this.GL;
+  this.vt_.GR = this.GR;
+
+  this.vt_.G0 = this.G0;
+  this.vt_.G1 = this.G1;
+  this.vt_.G2 = this.G2;
+  this.vt_.G3 = this.G3;
+};
+
+hterm.VT.prototype.reset = function() {
+  this.G0 = hterm.VT.CharacterMap.maps['B'];
+  this.G1 = hterm.VT.CharacterMap.maps['0'];
+  this.G2 = hterm.VT.CharacterMap.maps['B'];
+  this.G3 = hterm.VT.CharacterMap.maps['B'];
+
+  this.GL = 'G0';
+  this.GR = 'G0';
+
+  this.savedState_ = new hterm.VT.CursorState(this);
+
+  this.mouseReport_ = this.MOUSE_REPORT_DISABLED;
+  this.terminal.setSelectionEnabled(true);
+};
+
+hterm.VT.prototype.setMouseCellMotionTrick = function(state) {
+  this.mouseCellMotionTrick_ = state;
+
+  if ((state && this.mouseReport_ == this.MOUSE_REPORT_DRAG) ||
+      (!state && this.mouseReport_ == this.MOUSE_REPORT_CLICK_1002)) {
+    this.setDECMode('1002', true);
+  }
+};
+
+/**
+ * Handle terminal mouse events.
+ *
+ * See the "Mouse Tracking" section of [xterm].
+ */
+hterm.VT.prototype.onTerminalMouse_ = function(e) {
+  if (this.mouseReport_ == this.MOUSE_REPORT_DISABLED)
+    return;
+
+  // Temporary storage for our response.
+  var response;
+
+  // Modifier key state.
+  var mod = 0;
+  if (e.shiftKey)
+    mod |= 4;
+  if (e.metaKey || (this.terminal.keyboard.altIsMeta && e.altKey))
+    mod |= 8;
+  if (e.ctrlKey)
+    mod |= 16;
+
+  // TODO(rginda): We should also support mode 1005 and/or 1006 to extend the
+  // coordinate space.  Though, after poking around just a little, I wasn't
+  // able to get vi or emacs to use either of these modes.
+  var x = String.fromCharCode(lib.f.clamp(e.terminalColumn + 32, 32, 255));
+  var y = String.fromCharCode(lib.f.clamp(e.terminalRow + 32, 32, 255));
+
+  switch (e.type) {
+    case 'click':
+    case 'dblclick':
+      if (this.mouseReport_ == this.MOUSE_REPORT_CLICK ||
+	  this.mouseReport_ == this.MOUSE_REPORT_CLICK_1002) {
+	// Buttons are encoded as button number plus 32.
+	var b = Math.min(e.which - 1, 2) + 32;
+
+	// And mix in the modifier keys.
+	b |= mod;
+
+	response = '\x1b[M' + String.fromCharCode(b) + x + y;
+	response += '\x1b[M\x23' + x + y;
+      }
+      break;
+
+    case 'mousewheel':
+      // Mouse wheel is treated as button 1 or 2 plus an additional 64.
+      b = ((e.wheelDeltaY > 0) ? 0 : 1) + 96;
+      b |= mod;
+      response = '\x1b[M' + String.fromCharCode(b) + x + y;
+
+      // Keep the terminal from scrolling.
+      e.preventDefault();
+      break;
+
+    case 'mousedown':
+      if (this.mouseReport_ == this.MOUSE_REPORT_DRAG && e.which) {
+	// Buttons are encoded as button number plus 32.
+	var b = Math.min(e.which - 1, 2) + 32;
+
+	// And mix in the modifier keys.
+	b |= mod;
+
+	response = '\x1b[M' + String.fromCharCode(b) + x + y;
+      }
+      break;
+
+    case 'mouseup':
+      if (this.mouseReport_ == this.MOUSE_REPORT_DRAG && e.which) {
+	// Mouse up has no indication of which button was released.
+	response = '\x1b[M\x23' + x + y;
+      }
+      break;
+
+    case 'mousemove':
+      if (this.mouseReport_ == this.MOUSE_REPORT_DRAG && e.which) {
+	// Standard button bits.
+	b = 32 + Math.min(e.which - 1, 2);
+
+	// Add 32 to indicate mouse motion.
+	b += 32;
+
+	// And mix in the modifier keys.
+	b |= mod;
+
+	response = '\x1b[M' + String.fromCharCode(b) + x + y;
+      }
+
+      break;
+
+    default:
+      console.error('Unknown mouse event: ' + e.type, e);
+      break;
+  }
+
+  if (response)
+    this.terminal.io.sendString(response);
+};
+
 /**
  * Interpret a string of characters, displaying the results on the associated
  * terminal object.
@@ -236,7 +466,7 @@ hterm.VT.prototype.interpret = function(buf) {
     this.parseState_.func.call(this, this.parseState_);
 
     if (this.parseState_.func == func && this.parseState_.pos == pos &&
-        this.parseState_.buf == buf) {
+	this.parseState_.buf == buf) {
       throw 'Parser did not alter the state!';
     }
   }
@@ -245,94 +475,17 @@ hterm.VT.prototype.interpret = function(buf) {
 /**
  * Encode a UTF-16 string as UTF-8.
  *
- * This fails above 0xffff because it doesn't grok 4 byte UTF-16 characters.
- * TODO(rginda): Generalize for higher codepoints.
- *
  * See also: http://en.wikipedia.org/wiki/UTF-16
  */
 hterm.VT.prototype.encodeUTF8 = function(str) {
-  return str.replace(/([\u0080-\ud7ff\ue000-\uffff])/g, function(m, ch) {
-      var code = ch.charCodeAt(0);
-      if (code <= 0x07ff) {
-        // 110x-xxxx 10xx-xxxx
-        // 11 bits encoded in 2 bytes.
-        return String.fromCharCode(0xc0 | (code >> 6)) +
-            String.fromCharCode (0x80 | (code & 0x3f));
-      }
-
-      if (code <= 0xffff) {
-        // 1110-xxxx 10xx-xxxx 10xx-xxxx
-        // 16 bits of 2 bytes encoded in 3 bytes.
-        return String.fromCharCode(0xe0 | (code >> 12)) +
-            String.fromCharCode (0x80 | (code >> 6 & 0x3f)) +
-            String.fromCharCode (0x80 | (code & 0x3f));
-      }
-    });
+  return lib.encodeUTF8(str);
 };
 
 /**
  * Decode a UTF-8 string into UTF-16.
  */
 hterm.VT.prototype.decodeUTF8 = function(str) {
-  function fromBigCharCode(codePoint) {
-    // String.fromCharCode can't handle codepoints > 2 bytes without
-    // this magic.  See <http://goo.gl/jpcx0>.
-    if (codePoint > 0xffff) {
-      codePoint -= 0x1000;
-      return String.fromCharCode(0xd800 + (codePoint >> 10),
-                                 0xdc00 + (codePoint & 0x3ff));
-    }
-
-    return String.fromCharCode(codePoint);
-  }
-
-  return str.replace(this.utf8Pattern_, function(bytes) {
-      var ary = bytes.split('').map(function (e) { return e.charCodeAt(0) });
-      var ch = ary[0];
-      if (ch <= 0xdf) {
-        // 110x-xxxx 10xx-xxxx
-        // 11 bits of 2 bytes encoded in 2 bytes.
-        return String.fromCharCode(((ch & 0x1f) << 6) |
-                                   (ary[1] & 0x3f));
-      }
-
-      if (ch <= 0xef) {
-        // 1110-xxxx 10xx-xxxx 10xx-xxxx
-        // 16 bits of 2 bytes encoded in 3 bytes.
-        var rv = String.fromCharCode(((ch & 0x0f) << 12) |
-                                     (ary[1] & 0x3f) << 6 |
-                                     (ary[2] & 0x3f));
-        return rv;
-      }
-
-      if (ch <= 0xf7) {
-        // 1111-0xxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-        // 21 bits of 3 bytes encoded in 4 bytes.
-        return fromBigCharCode(((ch & 0x1f) << 18) |
-                               (ary[1] & 0x3f) << 12 |
-                               (ary[2] & 0x3f) << 6 |
-                               (ary[3] & 0x3f));
-      }
-
-      if (ch <= 0xfb) {
-        // 1111-10xx 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-        // 26 bits of 4 bytes encoded in 5 bytes.
-        return fromBigCharCode(((ch & 0x1f) << 24) |
-                               (ary[1] & 0x3f) << 18 |
-                               (ary[2] & 0x3f) << 12 |
-                               (ary[3] & 0x3f) << 6 |
-                               (ary[4] & 0x3f));
-      }
-
-      // 1111-110x 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx 10xx-xxxx
-      // 31 bits of 4 bytes encoded in 6 bytes.
-      return fromBigCharCode(((ch & 0x1f) << 30) |
-                             (ary[1] & 0x3f) << 24 |
-                             (ary[2] & 0x3f) << 18 |
-                             (ary[3] & 0x3f) << 12 |
-                             (ary[4] & 0x3f) << 6 |
-                             (ary[5] & 0x3f));
-    });
+  return this.utf8Decoder_.decode(str);
 };
 
 /**
@@ -343,6 +496,18 @@ hterm.VT.prototype.decodeUTF8 = function(str) {
  * printed to the terminal, then the control character will be dispatched.
  */
 hterm.VT.prototype.parseUnknown_ = function(parseState) {
+  var self = this;
+
+  function print(str) {
+    if (self[self.GL].GL)
+      str = self[self.GL].GL(str);
+
+    if (self[self.GR].GR)
+      str = self[self.GR].GR(str);
+
+    self.terminal.print(str);
+  };
+
   // Search for the next contiguous block of plain text.
   var buf = parseState.peekRemainingBuf();
   var nextControl = buf.search(this.cc1Pattern_);
@@ -356,12 +521,12 @@ hterm.VT.prototype.parseUnknown_ = function(parseState) {
 
   if (nextControl == -1) {
     // There are no control characters in this string.
-    this.terminal.print(buf);
+    print(buf);
     parseState.reset();
     return;
   }
 
-  this.terminal.print(buf.substr(0, nextControl));
+  print(buf.substr(0, nextControl));
   this.dispatch('CC1', buf.substr(nextControl, 1), parseState);
   parseState.advance(nextControl + 1);
 };
@@ -378,7 +543,7 @@ hterm.VT.prototype.parseCSI_ = function(parseState) {
   if (ch >= '@' && ch <= '~') {
     // This is the final character.
     this.dispatch('CSI', this.leadingModifier_ + this.trailingModifier_ + ch,
-                  parseState);
+		  parseState);
     parseState.resetParseFunction();
 
   } else if (ch == ';') {
@@ -389,8 +554,8 @@ hterm.VT.prototype.parseCSI_ = function(parseState) {
 
     } else {
       if (!args.length) {
-        // They omitted the first param, we need to supply it.
-        args.push('');
+	// They omitted the first param, we need to supply it.
+	args.push('');
       }
 
       args.push('');
@@ -404,9 +569,9 @@ hterm.VT.prototype.parseCSI_ = function(parseState) {
       parseState.resetParseFunction();
     } else {
       if (!args.length) {
-        args[0] = ch;
+	args[0] = ch;
       } else {
-        args[args.length - 1] += ch;
+	args[args.length - 1] += ch;
       }
     }
 
@@ -481,7 +646,7 @@ hterm.VT.prototype.parseUntilStringTerminator_ = function(parseState) {
 
   parseState.resetParseFunction();
   parseState.advance(nextTerminator +
-                     (buf.substr(nextTerminator, 1) == '\x1b' ? 2 : 1));
+		     (buf.substr(nextTerminator, 1) == '\x1b' ? 2 : 1));
 
   return true;
 };
@@ -513,7 +678,7 @@ hterm.VT.prototype.dispatch = function(type, code, parseState) {
     // (APC, '\x9f') from locking up the terminal waiting for its expected
     // (ST, '\x9c') or (BEL, '\x07').
     console.warn('Ignoring 8-bit control code: 0x' +
-                 code.charCodeAt(0).toString(16));
+		 code.charCodeAt(0).toString(16));
     return;
   }
 
@@ -576,9 +741,9 @@ hterm.VT.prototype.setANSIMode = function(code, state) {
  *     47 - [!] Use Alternate Screen Buffer.
  *     66 - [!] Application keypad (DECNKM).
  *     67 - Backarrow key sends backspace (DECBKM).
- *   1000 - [!] Send Mouse X & Y on button press and release.
+ *   1000 - Send Mouse X & Y on button press and release.  (MOUSE_REPORT_CLICK)
  *   1001 - [!] Use Hilite Mouse Tracking.
- *   1002 - [!] Use Cell Motion Mouse Tracking.
+ *   1002 - Use Cell Motion Mouse Tracking.  (MOUSE_REPORT_DRAG)
  *   1003 - [!] Use All Motion Mouse Tracking.
  *   1004 - [!] Send FocusIn/FocusOut events.
  *   1005 - [!] Enable Extended Mouse Mode.
@@ -618,10 +783,10 @@ hterm.VT.prototype.setDECMode = function(code, state) {
 
     case '3':  // DECCOLM
       if (this.allowColumnWidthChanges_) {
-        this.terminal.setWidth(state ? 132 : 80);
+	this.terminal.setWidth(state ? 132 : 80);
 
-        this.terminal.clearHome();
-        this.terminal.setVTScrollRegion(null, null);
+	this.terminal.clearHome();
+	this.terminal.setVTScrollRegion(null, null);
       }
       break;
 
@@ -657,6 +822,27 @@ hterm.VT.prototype.setDECMode = function(code, state) {
       this.terminal.keyboard.backspaceSendsBackspace = state;
       break;
 
+    case '1000':  // Report on mouse clicks only.
+      this.mouseReport_ = (
+	  state ? this.MOUSE_REPORT_CLICK : this.MOUSE_REPORT_DISABLED);
+      this.terminal.setSelectionEnabled(true);
+      break;
+
+    case '1002':  // Report on mouse clicks and drags
+      if (!state) {
+	this.mouseReport_ = this.MOUSE_REPORT_DISABLED;
+	this.terminal.setSelectionEnabled(true);
+
+      } else if (this.mouseCellMotionTrick_) {
+	this.mouseReport_ = this.MOUSE_REPORT_CLICK_1002;
+	this.terminal.setSelectionEnabled(true);
+
+      } else {
+	this.mouseReport_ = this.MOUSE_REPORT_DRAG;
+	this.terminal.setSelectionEnabled(false);
+      }
+      break;
+
     case '1010':  // rxvt
       this.terminal.scrollOnOutput = state;
       break;
@@ -679,23 +865,23 @@ hterm.VT.prototype.setDECMode = function(code, state) {
       break;
 
     case '1048':  // Save cursor as in DECSC.
-      this.terminal.saveOptions();
+      this.savedState_.save();
 
     case '1049':  // 1047 + 1048 + clear.
       if (state) {
-        this.terminal.saveOptions();
-        this.terminal.setAlternateMode(state);
-        this.terminal.clear();
+	this.savedState_.save();
+	this.terminal.setAlternateMode(state);
+	this.terminal.clear();
       } else {
-        this.terminal.setAlternateMode(state);
-        this.terminal.restoreOptions();
+	this.terminal.setAlternateMode(state);
+	this.savedState_.restore();
       }
 
       break;
 
     default:
       if (this.warnUnimplemented)
-        console.warn('Unimplemented DEC Private Mode: ' + code);
+	console.warn('Unimplemented DEC Private Mode: ' + code);
       break;
   }
 };
@@ -749,9 +935,9 @@ hterm.VT.VT52 = {};
 /**
  * Null (NUL).
  *
- * Ignored.
+ * Silently ignored.
  */
-hterm.VT.CC1['\x00'] = hterm.VT.ignore;
+hterm.VT.CC1['\x00'] = function () {};
 
 /**
  * Enquiry (ENQ).
@@ -796,7 +982,7 @@ hterm.VT.CC1['\x09'] = function() {
  * This code causes a line feed or a new line operation.  See Automatic
  * Newline (LNM).
  */
-hterm.VT.CC1['\x0A'] = function() {
+hterm.VT.CC1['\x0a'] = function() {
   this.terminal.formFeed();
 };
 
@@ -805,14 +991,14 @@ hterm.VT.CC1['\x0A'] = function() {
  *
  * Interpreted as LF.
  */
-hterm.VT.CC1['\x0B'] = hterm.VT.CC1['\x0A'];
+hterm.VT.CC1['\x0b'] = hterm.VT.CC1['\x0a'];
 
 /**
  * Form Feed (FF).
  *
  * Interpreted as LF.
  */
-hterm.VT.CC1['\x0C'] = function() {
+hterm.VT.CC1['\x0c'] = function() {
   this.terminal.formFeed();
 };
 
@@ -821,21 +1007,27 @@ hterm.VT.CC1['\x0C'] = function() {
  *
  * Move cursor to the left margin on the current line.
  */
-hterm.VT.CC1['\x0D'] = function() {
+hterm.VT.CC1['\x0d'] = function() {
   this.terminal.setCursorColumn(0);
 };
 
 /**
- * Shift Out (SO).
+ * Shift Out (SO), aka Lock Shift 0 (LS1).
  *
- * Invoke G1 character set, as designated by SCS control sequence.
+ * Invoke G1 character set in GL.
  */
-hterm.VT.CC1['\x0E'] = hterm.VT.ignore;
+hterm.VT.CC1['\x0e'] = function() {
+  this.GL = 'G1';
+};
 
 /**
- * Shift In (SI) - Select G0 character set, as selected by ESC ( sequence.
+ * Shift In (SI), aka Lock Shift 0 (LS0).
+ *
+ * Invoke G0 character set in GL.
  */
-hterm.VT.CC1['\x0F'] = hterm.VT.ignore;
+hterm.VT.CC1['\x0f'] = function() {
+  this.GL = 'G0';
+};
 
 /**
  * Transmit On (XON).
@@ -873,12 +1065,12 @@ hterm.VT.CC1['\x18'] = function(parseState) {
  *
  * Interpreted as CAN.
  */
-hterm.VT.CC1['\x1A'] = hterm.VT.CC1['\x18'];
+hterm.VT.CC1['\x1a'] = hterm.VT.CC1['\x18'];
 
 /**
  * Escape (ESC).
  */
-hterm.VT.CC1['\x1B'] = function(parseState) {
+hterm.VT.CC1['\x1b'] = function(parseState) {
   function parseESC(parseState) {
     var ch = parseState.consumeChar();
 
@@ -897,7 +1089,7 @@ hterm.VT.CC1['\x1B'] = function(parseState) {
 /**
  * Delete (DEL).
  */
-hterm.VT.CC1['\x7F'] = hterm.VT.ignore;
+hterm.VT.CC1['\x7f'] = hterm.VT.ignore;
 
 // 8 bit control characters and their two byte equivalents, below...
 
@@ -1158,7 +1350,7 @@ hterm.VT.ESC['%'] = function(parseState) {
 };
 
 /**
- * Designate G1, G2 and G3 character sets.  Not currently implemented.
+ * Character Set Selection (SCS).
  *
  *   ESC ( Ps - Set G0 character set (VT100).
  *   ESC ) Ps - Set G1 character set (VT220).
@@ -1167,7 +1359,6 @@ hterm.VT.ESC['%'] = function(parseState) {
  *   ESC - Ps - Set G1 character set (VT300).
  *   ESC . Ps - Set G2 character set (VT300).
  *   ESC / Ps - Set G3 character set (VT300).
- *              These work for 96 character sets only.
  *
  * Values for Ps are:
  *   0 - DEC Special Character and Line Drawing Set.
@@ -1203,9 +1394,16 @@ hterm.VT.ESC['/'] = function(parseState, code) {
       return;
     }
 
-    if ('0AB4C5RQKYEZH7='.indexOf(ch) != -1) {
-      if (this.warnUnimplemented)
-        console.log('Unimplemented character set: ' + ch);
+    if (ch in hterm.VT.CharacterMap.maps) {
+      if (code == '(') {
+	this.G0 = hterm.VT.CharacterMap.maps[ch];
+      } else if (code == ')' || code == '-') {
+	this.G1 = hterm.VT.CharacterMap.maps[ch];
+      } else if (code == '*' || code == '.') {
+	this.G2 = hterm.VT.CharacterMap.maps[ch];
+      } else if (code == '+' || code == '/') {
+	this.G3 = hterm.VT.CharacterMap.maps[ch];
+      }
     } else if (this.warnUnimplemented) {
       console.log('Invalid character set for "' + code + '": ' + ch);
     }
@@ -1225,14 +1423,14 @@ hterm.VT.ESC['6'] = hterm.VT.ignore;
  * Save Cursor (DECSC).
  */
 hterm.VT.ESC['7'] = function() {
-  this.terminal.saveOptions();
+  this.savedState_.save();
 };
 
 /**
  * Restore Cursor (DECSC).
  */
 hterm.VT.ESC['8'] = function() {
-  this.terminal.restoreOptions();
+  this.savedState_.restore();
 };
 
 /**
@@ -1270,6 +1468,7 @@ hterm.VT.ESC['F'] = hterm.VT.ignore;
  * Full Reset (RIS).
  */
 hterm.VT.ESC['c'] = function() {
+  this.reset();
   this.terminal.reset();
 };
 
@@ -1282,22 +1481,49 @@ hterm.VT.ESC['l'] =
 hterm.VT.ESC['m'] = hterm.VT.ignore;
 
 /**
- * Invoke character set.
+ * Lock Shift 2 (LS2)
  *
- *   'ESC n' - Invoke the G2 Character Set as GL (LS2).
- *   'ESC o' - Invoke the G3 Character Set as GL (LS3).
- *   'ESC |' - Invoke the G3 Character Set as GR (LS3R).
- *   'ESC }' - Invoke the G2 Character Set as GR (LS2R).
- *   'ESC ~' - Invoke the G1 Character Set as GR (LS1R).
- *
- * LS3R, LS2R, LS1R will not implement.
- * TODO(rginda): LS2, LS3
+ * Invoke the G2 Character Set as GL.
  */
-hterm.VT.ESC['n'] =
-hterm.VT.ESC['o'] =
-hterm.VT.ESC['|'] =
-hterm.VT.ESC['}'] =
-hterm.VT.ESC['~'] = hterm.VT.ignore;
+hterm.VT.ESC['n'] = function() {
+  this.GL = 'G2';
+};
+
+/**
+ * Lock Shift 3 (LS3)
+ *
+ * Invoke the G3 Character Set as GL.
+ */
+hterm.VT.ESC['o'] = function() {
+  this.GL = 'G3';
+};
+
+/**
+ * Lock Shift 2, Right (LS3R)
+ *
+ * Invoke the G3 Character Set as GR.
+ */
+hterm.VT.ESC['|'] = function() {
+  this.GR = 'G3';
+};
+
+/**
+ * Lock Shift 2, Right (LS2R)
+ *
+ * Invoke the G2 Character Set as GR.
+ */
+hterm.VT.ESC['}'] = function() {
+  this.GR = 'G2';
+};
+
+/**
+ * Lock Shift 1, Right (LS1R)
+ *
+ * Invoke the G1 Character Set as GR.
+ */
+hterm.VT.ESC['~'] = function() {
+  this.GR = 'G1';
+};
 
 /**
  * Change icon name and window title.
@@ -1321,7 +1547,7 @@ hterm.VT.OSC['4'] = function(parseState) {
   // We split on the semicolon and iterate through the pairs.
   var args = parseState.args[0].split(';');
 
-  var pairCount = parseInt(parseState.args.length / 2);
+  var pairCount = parseInt(args.length / 2);
   var colorPalette = this.terminal.getTextAttributes().colorPalette;
   var responseArray = [];
 
@@ -1334,20 +1560,40 @@ hterm.VT.OSC['4'] = function(parseState) {
 
     if (colorValue == '?') {
       // '?' means we should report back the current color value.
-      colorValue = hterm.colors.cssToX11(colorPalette[colorIndex]);
+      colorValue = lib.colors.rgbToX11(colorPalette[colorIndex]);
       if (colorValue)
-        responseArray.push(colorIndex + ';' + colorValue);
+	responseArray.push(colorIndex + ';' + colorValue);
 
       continue;
     }
 
-    colorValue = hterm.colors.x11ToCSS(colorValue);
+    colorValue = lib.colors.x11ToCSS(colorValue);
     if (colorValue)
       colorPalette[colorIndex] = colorValue;
   }
 
   if (responseArray.length)
     this.terminal.io.sendString('\x1b]4;' + responseArray.join(';') + '\x07');
+};
+
+/**
+ * Set/read system clipboard.
+ *
+ * Read is not implemented due to security considerations.  A remote app
+ * that is able to both write and read to the clipboard could essentially
+ * take over your session.
+ */
+hterm.VT.OSC['52'] = function(parseState) {
+  // Args come in as a single 'clipboard;b64-data' string.  The clipboard
+  // parameter is used to select which of the X clipboards to address.  Since
+  // we're not integrating with X, we treat them all the same.
+  var args = parseState.args[0].match(/^[cps01234567]+;(.*)/);
+  if (!args)
+    return;
+
+  var data = atob(args[1]);
+  if (data)
+    this.terminal.copyStringToClipboard(data);
 };
 
 /**
@@ -1419,7 +1665,7 @@ hterm.VT.CSI['G'] = function(parseState) {
  */
 hterm.VT.CSI['H'] = function(parseState) {
   this.terminal.setCursorPosition(parseState.iarg(0, 1) - 1,
-                                  parseState.iarg(1, 1) - 1);
+				  parseState.iarg(1, 1) - 1);
 };
 
 /**
@@ -1427,7 +1673,7 @@ hterm.VT.CSI['H'] = function(parseState) {
  */
 hterm.VT.CSI['I'] = function(parseState) {
   var count = parseState.iarg(0, 1);
-  count = hterm.clamp(count, 1, this.terminal.screenSize.width);
+  count = lib.f.clamp(count, 1, this.terminal.screenSize.width);
   for (var i = 0; i < count; i++) {
     this.terminal.forwardTabStop();
   }
@@ -1543,7 +1789,7 @@ hterm.VT.CSI['X'] = function(parseState) {
  */
 hterm.VT.CSI['Z'] = function(parseState) {
   var count = parseState.iarg(0, 1);
-  count = hterm.clamp(count, 1, this.terminal.screenSize.width);
+  count = lib.f.clamp(count, 1, this.terminal.screenSize.width);
   for (var i = 0; i < count; i++) {
     this.terminal.backwardTabStop();
   }
@@ -1743,79 +1989,78 @@ hterm.VT.CSI['m'] = function(parseState) {
 
     if (arg < 30) {
       if (arg == 0) {
-        attrs.reset();
+	attrs.reset();
       } else if (arg == 1) {
-        attrs.bold = true;
+	attrs.bold = true;
       } else if (arg == 4) {
-        attrs.underline = true;
+	attrs.underline = true;
       } else if (arg == 5) {
-        attrs.blink = true;
+	attrs.blink = true;
       } else if (arg == 7) {  // Inverse.
-        attrs.inverse = true;
+	attrs.inverse = true;
       } else if (arg == 8) {  // Invisible.
-        attrs.invisible = true;
+	attrs.invisible = true;
       } else if (arg == 22) {
-        attrs.bold = false;
+	attrs.bold = false;
       } else if (arg == 24) {
-        attrs.underline = false;
+	attrs.underline = false;
       } else if (arg == 25) {
-        attrs.blink = false;
+	attrs.blink = false;
       } else if (arg == 27) {
-        attrs.inverse = false;
+	attrs.inverse = false;
       } else if (arg == 28) {
-        attrs.invisible = false;
+	attrs.invisible = false;
       }
 
     } else if (arg < 50) {
       // Select fore/background color from bottom half of 16 color palette
       // or from the 256 color palette.
       if (arg < 38) {
-        attrs.foregroundIndex = arg - 30;
+	attrs.foregroundIndex = arg - 30;
 
       } else if (arg == 38) {
-        var c = get256(i);
-        if (c == null)
-          break;
+	var c = get256(i);
+	if (c == null)
+	  break;
 
-        i += 2;
+	i += 2;
 
-        if (c >= attrs.colorPalette.length)
-          continue;
+	if (c >= attrs.colorPalette.length)
+	  continue;
 
-        attrs.foregroundIndex = c;
+	attrs.foregroundIndex = c;
 
       } else if (arg == 39) {
-        attrs.foregroundIndex = null;
+	attrs.foregroundIndex = null;
 
       } else if (arg < 48) {
-        attrs.backgroundIndex = arg - 40;
+	attrs.backgroundIndex = arg - 40;
 
       } else if (arg == 48) {
-        var c = get256(i);
-        if (!c)
-          break;
+	var c = get256(i);
+	if (c == null)
+	  break;
 
-        i += 2;
+	i += 2;
 
-        if (c >= attrs.colorPalette.length)
-          continue;
+	if (c >= attrs.colorPalette.length)
+	  continue;
 
-        attrs.backgroundIndex = c;
+	attrs.backgroundIndex = c;
       } else {
-        attrs.backgroundIndex = null;
+	attrs.backgroundIndex = null;
       }
 
     } else if (arg >= 90 && arg <= 97) {
       attrs.foregroundIndex = arg - 90 + 8;
 
     } else if (arg >= 100 && arg <= 107) {
-      attrs.foregroundIndex = arg - 100 + 8;
-
+      attrs.backgroundIndex = arg - 100 + 8;
     }
   }
 
-  attrs.updateColors(this.terminal.getForegroundColor(),
-                     this.terminal.getBackgroundColor());
+  attrs.setDefaults(this.terminal.getForegroundColor(),
+		    this.terminal.getBackgroundColor());
 };
 
 /**
@@ -1896,6 +2141,7 @@ hterm.VT.CSI['>p'] = hterm.VT.ignore;
  * Soft terminal reset (DECSTR).
  */
 hterm.VT.CSI['!p'] = function() {
+  this.reset();
   this.terminal.softReset();
 };
 
@@ -1970,7 +2216,7 @@ hterm.VT.CSI['$r'] = hterm.VT.ignore;
  * Save cursor (ANSI.SYS)
  */
 hterm.VT.CSI['s'] = function() {
-  this.terminal.saveOptions();
+  this.savedState_.save();
 };
 
 /**

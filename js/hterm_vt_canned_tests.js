@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * @fileoverview VT canned data test suite.
  *
@@ -57,12 +59,12 @@
  * ignored.
  */
 
-hterm.VT.CannedTests = new TestManager.Suite('hterm.VT.CannedTests');
+hterm.VT.CannedTests = new lib.TestManager.Suite('hterm.VT.CannedTests');
 
 hterm.VT.CannedTests.prototype.setup = function(cx) {
   this.setDefaults(cx,
       { visibleColumnCount: 80,
-        visibleRowCount: 25,
+	visibleRowCount: 25,
       });
 };
 
@@ -116,16 +118,16 @@ hterm.VT.CannedTests.addTest = function(fileName) {
   function testProxy(result, cx) {
     var self = this;
     setTimeout(function() {
-        self.terminal.setCursorPosition(0, 0);
-        self.terminal.setCursorVisible(true);
-        self.loadCannedData(result, fileName, self.testCannedData.bind(self));
+	self.terminal.setCursorPosition(0, 0);
+	self.terminal.setCursorVisible(true);
+	self.loadCannedData(result, fileName, self.testCannedData.bind(self));
       }, 0);
 
     result.requestTime(5000);
   }
 
   var ary = fileName.match(/([^\/.]+)(\.[^.]+)?$/);
-  TestManager.Suite.addTest.apply(this, [ary[1], testProxy]);
+  lib.TestManager.Suite.addTest.apply(this, [ary[1], testProxy]);
 };
 
 /**
@@ -192,7 +194,7 @@ hterm.VT.CannedTests.prototype.testCannedData = function(result, data) {
     }
 
     var ary = line.match(
-        /^@@\s+OFFSET:(\d+)\s+LINES:(\d+)\s+CURSOR:(\d+),(\d+)\s*$/);
+	/^@@\s+OFFSET:(\d+)\s+LINES:(\d+)\s+CURSOR:(\d+),(\d+)\s*$/);
     result.assert(!!ary, 'header line: ' + line);
 
     var endOffset = Number(ary[1]);
@@ -203,13 +205,13 @@ hterm.VT.CannedTests.prototype.testCannedData = function(result, data) {
     for (var rowIndex = 0; rowIndex < lineCount; rowIndex++) {
       headerIndex++;
       result.assertEQ(this.terminal.getRowText(rowIndex),
-                      headerLines[headerIndex],
-                      'row:' + rowIndex);
+		      headerLines[headerIndex],
+		      'row:' + rowIndex);
     }
 
     result.assertEQ(this.terminal.getCursorRow(), Number(ary[3]), 'cursor row');
     result.assertEQ(this.terminal.getCursorColumn(), Number(ary[4]),
-                    'cursor column');
+		    'cursor column');
 
     startOffset = endOffset;
   }
@@ -225,3 +227,5 @@ hterm.VT.CannedTests.prototype.testCannedData = function(result, data) {
 hterm.VT.CannedTests.addTest('../test_data/vttest-01.log');
 
 hterm.VT.CannedTests.addTest('../test_data/vttest-02.log');
+
+hterm.VT.CannedTests.addTest('../test_data/charsets.log');

@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
+lib.rtdep('hterm.Keyboard.KeyMap');
+
 /**
  * Keyboard handler.
  *
@@ -23,25 +27,32 @@ hterm.Keyboard = function(terminal) {
   // so they can be uninstalled with removeEventListener, when required.
   this.handlers_ = [
       ['keypress', this.onKeyPress_.bind(this)],
-      ['keydown', this.onKeyDown_.bind(this)]
+      ['keydown', this.onKeyDown_.bind(this)],
+      ['textInput', this.onTextInput_.bind(this)]
   ];
 
   /**
    * The current key map.
    */
-  this.keyMap = new hterm.Keyboard.KeyMap.Default(this);
+  this.keyMap = new hterm.Keyboard.KeyMap(this);
+
+  /**
+   * If true, Shift-Insert will fall through to the browser as a paste.
+   * If false, the keystroke will be sent to the host.
+   */
+  this.shiftInsertPaste = true;
 
   /**
    * If true, home/end will control the terminal scrollbar and shift home/end
    * will send the VT keycodes.  If false then home/end sends VT codes and
    * shift home/end scrolls.
    */
-  this.homeKeysScroll = terminal.prefs_.get('home-keys-scroll');
+  this.homeKeysScroll = false;
 
   /**
    * Same as above, except for page up/page down.
    */
-  this.pageKeysScroll = terminal.prefs_.get('page-keys-scroll');
+  this.pageKeysScroll = false;
 
   /**
    * Enable/disable application keypad.
@@ -61,13 +72,12 @@ hterm.Keyboard = function(terminal) {
    * If true, the backspace should send BS ('\x08', aka ^H).  Otherwise
    * the backspace key should send '\x7f'.
    */
-  this.backspaceSendsBackspace = terminal.prefs_.get(
-      'backspace-sends-backspace');
+  this.backspaceSendsBackspace = false;
 
   /**
    * Set whether the meta key sends a leading escape or not.
    */
-  this.metaSendsEscape = terminal.prefs_.get('meta-sends-escape');
+  this.metaSendsEscape = true;
 
   /**
    * Controls how the alt key is handled.
@@ -81,7 +91,7 @@ hterm.Keyboard = function(terminal) {
    * This setting only matters when alt is distinct from meta (altIsMeta is
    * false.)
    */
-  this.altSendsWhat = terminal.prefs_.get('alt-sends-what');
+  this.altSendsWhat = 'escape';
 
   /**
    * Set whether the alt key acts as a meta key, instead of producing 8-bit
@@ -89,91 +99,7 @@ hterm.Keyboard = function(terminal) {
    *
    * True to enable, false to disable, null to autodetect based on platform.
    */
-  this.altIsMeta = terminal.prefs_.get('alt-is-meta');
-};
-
-/**
- * A KeyMap object.
- *
- * Contains a mapping of keyCodes to keyDefs (aka key definitions).  The key
- * definition tells the hterm.Keyboard class how to handle keycodes.
- */
-hterm.Keyboard.KeyMap = function(keyboard, name) {
-  this.keyboard = keyboard;
-  this.name = name;
-  this.keyDefs = {};
-};
-
-/**
- * Add a single key definition.
- *
- * The definition is a hash containing the following keys: 'keyCap', 'normal',
- * 'control', and 'alt'.
- *
- *  - keyCap is a string identifying the key.  For printable
- *    keys, the key cap should be exactly two characters, starting with the
- *    unshifted version.  For example, 'aA', 'bB', '1!' and '=+'.  For
- *    non-printable the key cap should be surrounded in square braces, as in
- *    '[INS]', '[LEFT]'.  By convention, non-printable keycaps are in uppercase
- *    but this is not a strict requirement.
- *
- *  - Normal is the action that should be performed when they key is pressed
- *    in the absence of any modifier.  See below for the supported actions.
- *
- *  - Control is the action that should be performed when they key is pressed
- *    along with the control modifier.  See below for the supported actions.
- *
- *  - Alt is the action that should be performed when they key is pressed
- *    along with the alt modifier.  See below for the supported actions.
- *
- *  - Meta is the action that should be performed when they key is pressed
- *    along with the meta modifier.  See below for the supported actions.
- *
- * Actions can be one of the hterm.Keyboard.KeyActions as documented below,
- * a literal string, or an array.  If the action is a literal string then
- * the string is sent directly to the host.  If the action is an array it
- * is taken to be an escape sequence that may be altered by modifier keys.
- * The second-to-last element of the array will be overwritten with the
- * state of the modifier keys, as specified in the final table of "PC-Style
- * Function Keys" from [XTERM].
- */
-hterm.Keyboard.KeyMap.prototype.addKeyDef = function(keyCode, def) {
-  if (keyCode in this.keyDefs)
-    console.warn('Duplicate keyCode: ' + keyCode);
-
-  this.keyDefs[keyCode] = def;
-};
-
-/**
- * Add mutiple key definitions in a single call.
- *
- * This function takes the key definitions as variable argument list.  Each
- * argument is the key definition specified as an array.
- *
- * (If the function took everything as one big hash we couldn't detect
- * duplicates, and there would be a lot more typing involved.)
- *
- * Each key definition should have 6 elements: (keyCode, keyCap, normal action,
- * control action, alt action and meta action).  See KeyMap.addKeyDef for the
- * meaning of these elements.
- */
-hterm.Keyboard.KeyMap.prototype.addKeyDefs = function(var_args) {
-  for (var i = 0; i < arguments.length; i++) {
-    this.addKeyDef(arguments[i][0],
-                   { keyCap: arguments[i][1],
-                     normal: arguments[i][2],
-                     control: arguments[i][3],
-                     alt: arguments[i][4],
-                     meta: arguments[i][5]
-                   });
-  }
-};
-
-/**
- * Reset the KeyMap to its initial state.
- */
-hterm.Keyboard.KeyMap.prototype.reset = function() {
-  this.keyDefs = {};
+  this.altIsMeta = false;
 };
 
 /**
@@ -269,6 +195,19 @@ hterm.Keyboard.prototype.uninstallKeyboard = function() {
 };
 
 /**
+ * Handle onTextInput events.
+ *
+ * We're not actually supposed to get these, but we do on the Mac in the case
+ * where a third party app sends synthetic keystrokes to Chrome.
+ */
+hterm.Keyboard.prototype.onTextInput_ = function(e) {
+  if (!e.data)
+    return;
+
+  e.data.split('').forEach(this.terminal.onVTKeystroke.bind(this.terminal));
+};
+
+/**
  * Handle onKeyPress events.
  */
 hterm.Keyboard.prototype.onKeyPress_ = function(e) {
@@ -310,11 +249,16 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
     return;
   }
 
+  // The type of action we're going to use.
+  var resolvedActionType = null;
+
   var self = this;
   function getAction(name) {
     // Get the key action for the given action name.  If the action is a
     // function, dispatch it.  If the action defers to the normal action,
     // resolve that instead.
+
+    resolvedActionType = name;
 
     var action = keyDef[name];
     if (typeof action == 'function')
@@ -393,35 +337,21 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
     return;
   }
 
-  if (action.substr(0, 2) != '\x1b[') {
-    // The action is not an escape sequence...
+  // Strip the modifier that is associated with the action, since we assume that
+  // modifier has already been accounted for in the action.
+  if (resolvedActionType == 'control') {
+    control = false;
+  } else if (resolvedActionType == 'alt') {
+    alt = false;
+  } else if (resolvedActionType == 'meta') {
+    meta = false;
+  }
 
-    if (action === DEFAULT) {
-      if (control) {
-        var unshifted = keyDef.keyCap.substr(0, 1);
-        var code = unshifted.charCodeAt(0);
-        if (code >= 64 && code <= 95) {
-        action = String.fromCharCode(code - 64);
-        }
-      } else if (alt && this.altSendsWhat == '8-bit') {
-        var ch = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
-        var code = ch.charCodeAt(0) + 128;
-        action = this.terminal.vt.encodeUTF8(String.fromCharCode(code));
-      } else {
-        action = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
-      }
-    }
+  if (action.substr(0, 2) == '\x1b[' && (alt || control || shift)) {
+    // The action is an escape sequence that and it was triggered in the
+    // presence of a keyboard modifier, we may need to alter the action to
+    // include the modifier before sending it.
 
-    // We respect alt/metaSendsEscape even if the keymap action was a literal
-    // string.  Otherwise, every overridden alt/meta action would have to
-    // check alt/metaSendsEscape.
-    if ((alt && this.altSendsWhat == 'escape') ||
-        (this.metaSendsEscape && meta)) {
-      action = '\x1b' + action;
-    }
-
-  } else if (alt || control || shift) {
-    // It's an escape sequence in the presence of a keyboard modifier...
     var mod;
 
     if (shift && !(alt || control)) {
@@ -445,8 +375,35 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
       action = '\x1b[1' + mod + action.substr(2, 1);
     } else {
       // Others always have at least one parameter.
-      action = action.substr(0, action.length - 2) + mod +
-          action.substr(action.length - 1);
+      action = action.substr(0, action.length - 1) + mod +
+	  action.substr(action.length - 1);
+    }
+
+  } else {
+    // Just send it as-is.
+
+    if (action === DEFAULT) {
+      if (control) {
+	var unshifted = keyDef.keyCap.substr(0, 1);
+	var code = unshifted.charCodeAt(0);
+	if (code >= 64 && code <= 95) {
+	action = String.fromCharCode(code - 64);
+	}
+      } else if (alt && this.altSendsWhat == '8-bit') {
+	var ch = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
+	var code = ch.charCodeAt(0) + 128;
+	action = this.terminal.vt.encodeUTF8(String.fromCharCode(code));
+      } else {
+	action = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
+      }
+    }
+
+    // We respect alt/metaSendsEscape even if the keymap action was a literal
+    // string.  Otherwise, every overridden alt/meta action would have to
+    // check alt/metaSendsEscape.
+    if ((alt && this.altSendsWhat == 'escape') ||
+	(meta && this.metaSendsEscape)) {
+      action = '\x1b' + action;
     }
   }
 
