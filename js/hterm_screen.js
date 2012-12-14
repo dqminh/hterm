@@ -349,8 +349,10 @@ hterm.Screen.prototype.setCursorPosition = function(row, column) {
  * cursor position.
  */
 hterm.Screen.prototype.syncSelectionCaret = function(selection) {
-  // TODO: somehow this is broken in firefox
-  // selection.collapse(this.cursorNode_, this.cursorOffset_);
+  // offset
+  // 0 - Collapses the selection from the anchor to the beginning of parentNode's text.
+  // 1 - Collapses the selection from the anchor to the end of parentNode's text
+  selection.collapse(this.cursorNode_, 0);
 };
 
 /**
