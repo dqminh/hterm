@@ -39,7 +39,7 @@ hterm.VT.CharacterMap.prototype.reset = function(glmap) {
   this.glmap = glmap;
 
   var glkeys = Object.keys(this.glmap).map(function(key) {
-      return '\\x' + lib.f.zpad(key.charCodeAt(0).toString(16));
+      return '\\x' + hterm.f.zpad(key.charCodeAt(0).toString(16));
     });
 
   this.glre = new RegExp('[' + glkeys.join('') + ']', 'g');
@@ -54,7 +54,7 @@ hterm.VT.CharacterMap.prototype.reset = function(glmap) {
     }.bind(this));
 
   var grkeys = Object.keys(this.grmap).map(function(key) {
-      return '\\x' + lib.f.zpad(key.charCodeAt(0).toString(16), 2);
+      return '\\x' + hterm.f.zpad(key.charCodeAt(0).toString(16), 2);
     });
 
   this.grre = new RegExp('[' + grkeys.join('') + ']', 'g');

@@ -252,7 +252,7 @@ hterm.Screen.prototype.clearCursorRow = function() {
   if (this.textAttributes.isDefault()) {
     text = '';
   } else {
-    text = lib.f.getWhitespace(this.columnCount_);
+    text = hterm.f.getWhitespace(this.columnCount_);
   }
 
   var node = this.textAttributes.createContainer(text);
@@ -457,7 +457,7 @@ hterm.Screen.prototype.insertString = function(str) {
     // A negative reverse offset means the cursor is positioned past the end
     // of the characters on this line.  We'll need to insert the missing
     // whitespace.
-    var ws = lib.f.getWhitespace(-reverseOffset);
+    var ws = hterm.f.getWhitespace(-reverseOffset);
 
     // This whitespace should be completely unstyled.  Underline and background
     // color would be visible on whitespace, so we can't use one of those

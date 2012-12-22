@@ -1,8 +1,5 @@
 //= require hterm
 //= require_tree ./lib
-//= require lib_f
-//= require lib_utf8
-//= require ./lib/pubsub
 //= require hterm_default_preference
 //= require hterm_options
 //= require hterm_keyboard

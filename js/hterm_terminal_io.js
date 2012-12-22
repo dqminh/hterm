@@ -146,7 +146,7 @@ hterm.Terminal.IO.prototype.writelnUTF8 = function(string) {
  */
 hterm.Terminal.IO.prototype.print =
 hterm.Terminal.IO.prototype.writeUTF16 = function(string) {
-  this.writeUTF8(lib.encodeUTF8(string));
+  this.writeUTF8(hterm.encodeUTF8(string));
 };
 
 /**
@@ -156,5 +156,5 @@ hterm.Terminal.IO.prototype.writeUTF16 = function(string) {
  */
 hterm.Terminal.IO.prototype.println =
 hterm.Terminal.IO.prototype.writelnUTF16 = function(string) {
-  this.writelnUTF8(lib.encodeUTF8(string));
+  this.writelnUTF8(hterm.encodeUTF8(string));
 };

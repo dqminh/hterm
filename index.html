@@ -29,7 +29,6 @@
 <script src="application.js"></script>
 <script>
   $(document).ready(function() {
-    lib.ensureRuntimeDependencies();
     var terminal = new hterm.Terminal();
     terminal.decorate(document.querySelector('#terminal'));
     terminal.setCursorPosition(0, 0);

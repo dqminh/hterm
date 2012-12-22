@@ -1235,8 +1235,8 @@ hterm.VT.Tests.addTest('fullscreen', function(result, cx) {
 	  if (indent > 20)
 	    indent = 40 - indent;
 
-	  self.terminal.interpret('Line ' + lib.f.zpad(i, 3) + ': ' +
-				  lib.f.getWhitespace(indent) + '*\n');
+	  self.terminal.interpret('Line ' + hterm.f.zpad(i, 3) + ': ' +
+				  hterm.f.getWhitespace(indent) + '*\n');
 	}
 
 	result.pass();

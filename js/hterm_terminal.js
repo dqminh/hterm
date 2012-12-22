@@ -28,7 +28,7 @@ hterm.Terminal = function(preference) {
   // preference object of the terminal
   this.prefs_ = hterm.DefaultPreference();
   if (preference !== undefined) {
-    this.prefs_ = lib.f.extend(this.prefs_, preference);
+    this.prefs_ = hterm.f.extend(this.prefs_, preference);
   }
   // Two screen instances.
   this.primaryScreen_ = new hterm.Screen();
@@ -191,7 +191,7 @@ hterm.Terminal.prototype.setSelectionEnabled = function(state) {
  * with this method.
  */
 hterm.Terminal.prototype.setBackgroundColor = function(color) {
-  this.backgroundColor_ = lib.colors.normalizeCSS(color);
+  this.backgroundColor_ = hterm.colors.normalizeCSS(color);
   this.primaryScreen_.textAttributes.setDefaults(
       this.foregroundColor_, this.backgroundColor_);
   this.alternateScreen_.textAttributes.setDefaults(
@@ -216,7 +216,7 @@ hterm.Terminal.prototype.getBackgroundColor = function() {
  * with this method.
  */
 hterm.Terminal.prototype.setForegroundColor = function(color) {
-  this.foregroundColor_ = lib.colors.normalizeCSS(color);
+  this.foregroundColor_ = hterm.colors.normalizeCSS(color);
   this.primaryScreen_.textAttributes.setDefaults(
       this.foregroundColor_, this.backgroundColor_);
   this.alternateScreen_.textAttributes.setDefaults(
@@ -410,8 +410,8 @@ hterm.Terminal.prototype.setWindowTitle = function(title) {
  * @param {hterm.RowCol} cursor The position to restore.
  */
 hterm.Terminal.prototype.restoreCursor = function(cursor) {
-  var row = lib.f.clamp(cursor.row, 0, this.screenSize.height - 1);
-  var column = lib.f.clamp(cursor.column, 0, this.screenSize.width - 1);
+  var row = hterm.f.clamp(cursor.row, 0, this.screenSize.height - 1);
+  var column = hterm.f.clamp(cursor.column, 0, this.screenSize.width - 1);
   this.screen_.setCursorPosition(row, column);
   if (cursor.column > column ||
       cursor.column == column && cursor.overflow) {
@@ -1200,7 +1200,7 @@ hterm.Terminal.prototype.reverseLineFeed = function() {
 hterm.Terminal.prototype.eraseToLeft = function() {
   var cursor = this.saveCursor();
   this.setCursorColumn(0);
-  this.screen_.overwriteString(lib.f.getWhitespace(cursor.column + 1));
+  this.screen_.overwriteString(hterm.f.getWhitespace(cursor.column + 1));
   this.restoreCursor(cursor);
 };
 
@@ -1231,7 +1231,7 @@ hterm.Terminal.prototype.eraseToRight = function(opt_count) {
   }
 
   var cursor = this.saveCursor();
-  this.screen_.overwriteString(lib.f.getWhitespace(count));
+  this.screen_.overwriteString(hterm.f.getWhitespace(count));
   this.restoreCursor(cursor);
   this.clearCursorOverflow();
 };
@@ -1413,7 +1413,7 @@ hterm.Terminal.prototype.deleteLines = function(count) {
 hterm.Terminal.prototype.insertSpace = function(count) {
   var cursor = this.saveCursor();
 
-  var ws = lib.f.getWhitespace(count || 1);
+  var ws = hterm.f.getWhitespace(count || 1);
   this.screen_.insertString(ws);
   this.screen_.maybeClipCurrentRow();
 
@@ -1432,7 +1432,7 @@ hterm.Terminal.prototype.deleteChars = function(count) {
   if (deleted && !this.screen_.textAttributes.isDefault()) {
     var cursor = this.saveCursor();
     this.setCursorColumn(this.screenSize.width - deleted);
-    this.screen_.insertString(lib.f.getWhitespace(deleted));
+    this.screen_.insertString(hterm.f.getWhitespace(deleted));
     this.restoreCursor(cursor);
   }
 
@@ -1503,14 +1503,14 @@ hterm.Terminal.prototype.setCursorPosition = function(row, column) {
 
 hterm.Terminal.prototype.setRelativeCursorPosition = function(row, column) {
   var scrollTop = this.getVTScrollTop();
-  row = lib.f.clamp(row + scrollTop, scrollTop, this.getVTScrollBottom());
-  column = lib.f.clamp(column, 0, this.screenSize.width - 1);
+  row = hterm.f.clamp(row + scrollTop, scrollTop, this.getVTScrollBottom());
+  column = hterm.f.clamp(column, 0, this.screenSize.width - 1);
   this.screen_.setCursorPosition(row, column);
 };
 
 hterm.Terminal.prototype.setAbsoluteCursorPosition = function(row, column) {
-  row = lib.f.clamp(row, 0, this.screenSize.height - 1);
-  column = lib.f.clamp(column, 0, this.screenSize.width - 1);
+  row = hterm.f.clamp(row, 0, this.screenSize.height - 1);
+  column = hterm.f.clamp(column, 0, this.screenSize.width - 1);
   this.screen_.setCursorPosition(row, column);
 };
 
@@ -1610,7 +1610,7 @@ hterm.Terminal.prototype.cursorDown = function(count) {
   var maxHeight = (this.options_.originMode ? this.getVTScrollBottom() :
 		   this.screenSize.height - 1);
 
-  var row = lib.f.clamp(this.screen_.cursorPosition.row + count,
+  var row = hterm.f.clamp(this.screen_.cursorPosition.row + count,
 			minHeight, maxHeight);
   this.setAbsoluteCursorRow(row);
 };
@@ -1631,7 +1631,7 @@ hterm.Terminal.prototype.cursorLeft = function(count) {
  */
 hterm.Terminal.prototype.cursorRight = function(count) {
   count = count || 1;
-  var column = lib.f.clamp(this.screen_.cursorPosition.column + count,
+  var column = hterm.f.clamp(this.screen_.cursorPosition.column + count,
 			   0, this.screenSize.width - 1);
   this.setCursorColumn(column);
 };

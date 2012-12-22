@@ -67,12 +67,12 @@ hterm.VT = function(terminal) {
   // control character.
   var cc1 = Object.keys(hterm.VT.CC1).map(
       function(e) {
-	return '\\x' + lib.f.zpad(e.charCodeAt().toString(16), 2)
+	return '\\x' + hterm.f.zpad(e.charCodeAt().toString(16), 2)
       }).join('');
   this.cc1Pattern_ = new RegExp('[' + cc1 + ']');
 
   // Decoder to maintain UTF-8 decode state.
-  this.utf8Decoder_ = new lib.UTF8Decoder();
+  this.utf8Decoder_ = new hterm.UTF8Decoder();
 
   /**
    * Whether to accept the 8-bit control characters.
@@ -375,8 +375,8 @@ hterm.VT.prototype.onTerminalMouse_ = function(e) {
   // TODO(rginda): We should also support mode 1005 and/or 1006 to extend the
   // coordinate space.  Though, after poking around just a little, I wasn't
   // able to get vi or emacs to use either of these modes.
-  var x = String.fromCharCode(lib.f.clamp(e.terminalColumn + 32, 32, 255));
-  var y = String.fromCharCode(lib.f.clamp(e.terminalRow + 32, 32, 255));
+  var x = String.fromCharCode(hterm.f.clamp(e.terminalColumn + 32, 32, 255));
+  var y = String.fromCharCode(hterm.f.clamp(e.terminalRow + 32, 32, 255));
 
   switch (e.type) {
     case 'click':
@@ -475,7 +475,7 @@ hterm.VT.prototype.interpret = function(buf) {
  * See also: http://en.wikipedia.org/wiki/UTF-16
  */
 hterm.VT.prototype.encodeUTF8 = function(str) {
-  return lib.encodeUTF8(str);
+  return hterm.encodeUTF8(str);
 };
 
 /**
@@ -1670,7 +1670,7 @@ hterm.VT.CSI['H'] = function(parseState) {
  */
 hterm.VT.CSI['I'] = function(parseState) {
   var count = parseState.iarg(0, 1);
-  count = lib.f.clamp(count, 1, this.terminal.screenSize.width);
+  count = hterm.f.clamp(count, 1, this.terminal.screenSize.width);
   for (var i = 0; i < count; i++) {
     this.terminal.forwardTabStop();
   }
@@ -1786,7 +1786,7 @@ hterm.VT.CSI['X'] = function(parseState) {
  */
 hterm.VT.CSI['Z'] = function(parseState) {
   var count = parseState.iarg(0, 1);
-  count = lib.f.clamp(count, 1, this.terminal.screenSize.width);
+  count = hterm.f.clamp(count, 1, this.terminal.screenSize.width);
   for (var i = 0; i < count; i++) {
     this.terminal.backwardTabStop();
   }
