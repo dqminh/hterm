@@ -18,13 +18,4 @@
 //= require websocket_command_instance
 //= require_self
 
-$(document).ready(function() {
-  lib.ensureRuntimeDependencies();
-  var terminal = new hterm.Terminal();
-  terminal.decorate(document.querySelector('#terminal'));
-  terminal.setCursorPosition(0, 0);
-    terminal.setCursorVisible(true);
-    terminal.runCommandClass(WebsocketCommandInstance,
-      document.location.hash.substr(1));
-  window.term_ = terminal;
-});
+

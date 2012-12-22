@@ -8,12 +8,15 @@ var termServer = sockjs.createServer();
 var httpServer = http.createServer();
 var environment = new Mincer.Environment();
 environment.appendPath('js');
+environment.appendPath('spec');
 
 var assetsServer = Mincer.createServer(environment);
 var staticDir = new nodeStatic.Server(__dirname);
 
 httpServer.addListener('request', function(req, res) {
   if (req.url === '/application.js') {
+    assetsServer(req, res);
+  } else if (req.url === '/spec.js') {
     assetsServer(req, res);
   } else {
     staticDir.serve(req, res);
@@ -55,4 +58,3 @@ function handleConnection(conn) {
 termServer.on('connection', handleConnection)
 termServer.installHandlers(httpServer, { prefix: '/term' });
 httpServer.listen(8888);
-
