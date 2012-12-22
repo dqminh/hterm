@@ -1,5 +1,5 @@
 //= require spec_helper
-//= require_directory .
+//= require_tree ./javascript
 //= require_self
 
 (function() {

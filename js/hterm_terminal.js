@@ -4,10 +4,6 @@
 
 'use strict';
 
-lib.rtdep('lib.colors',
-	  'hterm.Keyboard', 'hterm.Options', 'hterm.DefaultPreference',
-	  'hterm.Screen', 'hterm.ScrollPort', 'hterm.Size', 'hterm.VT');
-
 /**
  * Constructor for the Terminal class.
  *
@@ -1967,7 +1963,7 @@ hterm.Terminal.prototype.copyStringToClipboard = function(str) {
 
   selection.selectAllChildren(copySource);
 
-  hterm.copySelectionToClipboard(this.document_);
+  //hterm.copySelectionToClipboard(this.document_);
 
   selection.collapse(anchorNode, anchorOffset);
   selection.extend(focusNode, focusOffset);

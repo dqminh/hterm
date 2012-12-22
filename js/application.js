@@ -1,5 +1,3 @@
-//= require lib
-//= require lib_colors
 //= require hterm
 //= require_tree ./lib
 //= require lib_f

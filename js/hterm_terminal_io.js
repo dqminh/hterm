@@ -4,8 +4,6 @@
 
 'use strict';
 
-lib.rtdep('lib.encodeUTF8');
-
 /**
  * Input/Output interface used by commands to communicate with the terminal.
  *

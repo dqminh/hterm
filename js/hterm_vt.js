@@ -4,9 +4,6 @@
 
 'use strict';
 
-lib.rtdep('lib.colors', 'lib.f', 'lib.UTF8Decoder',
-	  'hterm.VT.CharacterMap');
-
 /**
  * Constructor for the VT escape sequence interpreter.
  *
@@ -1560,14 +1557,14 @@ hterm.VT.OSC['4'] = function(parseState) {
 
     if (colorValue == '?') {
       // '?' means we should report back the current color value.
-      colorValue = lib.colors.rgbToX11(colorPalette[colorIndex]);
+      colorValue = hterm.colors.rgbToX11(colorPalette[colorIndex]);
       if (colorValue)
 	responseArray.push(colorIndex + ';' + colorValue);
 
       continue;
     }
 
-    colorValue = lib.colors.x11ToCSS(colorValue);
+    colorValue = hterm.colors.x11ToCSS(colorValue);
     if (colorValue)
       colorPalette[colorIndex] = colorValue;
   }

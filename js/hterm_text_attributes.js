@@ -4,8 +4,6 @@
 
 'use strict';
 
-lib.rtdep('lib.colors');
-
 /**
  * Constructor for TextAttribute objects.
  *
@@ -102,7 +100,7 @@ hterm.TextAttributes.prototype.reset = function() {
  * Reset the color palette to the default state.
  */
 hterm.TextAttributes.prototype.resetColorPalette = function() {
-  this.colorPalette = lib.colors.colorPalette.concat();
+  this.colorPalette = hterm.colors.colorPalette.concat();
   this.syncColors();
 };
 

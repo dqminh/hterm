@@ -1,7 +1,5 @@
 'use strict';
 
-lib.rtdep('lib.f');
-
 hterm.DefaultPreference = function() {
   return {
     /**
