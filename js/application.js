@@ -1,5 +1,7 @@
 //= require hterm
 //= require_tree ./lib
+//= require row_col
+//= require size
 //= require hterm_default_preference
 //= require hterm_options
 //= require hterm_keyboard
