@@ -143,7 +143,7 @@ hterm.Keyboard.KeyMap.prototype.reset = function() {
   // If not backspace-sends-backspace keypad a, else b.
   function bs(a, b) {
     return function(e, k) {
-      var action = !self.keyboard.backspaceSendsBackspace ? a : b
+      var action = a;
       return resolve(action, e, k);
     }
   }
@@ -326,9 +326,8 @@ hterm.Keyboard.KeyMap.prototype.reset = function() {
  * Either allow the paste or send a key sequence.
  */
 hterm.Keyboard.KeyMap.prototype.onKeyInsert_ = function(e) {
-  if (this.keyboard.shiftInsertPaste && e.shiftKey)
+  if (e.shiftKey)
     return hterm.Keyboard.KeyActions.PASS;
-
   return '\x1b[2~';
 };
 
@@ -336,12 +335,10 @@ hterm.Keyboard.KeyMap.prototype.onKeyInsert_ = function(e) {
  * Either scroll the scrollback buffer or send a key sequence.
  */
 hterm.Keyboard.KeyMap.prototype.onKeyHome_ = function(e) {
-  if (!this.keyboard.homeKeysScroll ^ e.shiftKey) {
-    if ((e.altey || e.ctrlKey || e.shiftKey) ||
-	!this.keyboard.applicationKeypad) {
+  if (!e.shiftKey) {
+    if ((e.altey || e.ctrlKey || e.shiftKey) || !this.keyboard.applicationKeypad) {
       return '\x1b[H';
     }
-
     return '\x1bOH';
   }
 
@@ -353,12 +350,10 @@ hterm.Keyboard.KeyMap.prototype.onKeyHome_ = function(e) {
  * Either scroll the scrollback buffer or send a key sequence.
  */
 hterm.Keyboard.KeyMap.prototype.onKeyEnd_ = function(e) {
-  if (!this.keyboard.homeKeysScroll ^ e.shiftKey) {
-    if ((e.altKey || e.ctrlKey || e.shiftKey) ||
-	!this.keyboard.applicationKeypad) {
+  if (!e.shiftKey) {
+    if ((e.altKey || e.ctrlKey || e.shiftKey) || !this.keyboard.applicationKeypad) {
       return '\x1b[F';
     }
-
     return '\x1bOF';
   }
 
@@ -370,9 +365,8 @@ hterm.Keyboard.KeyMap.prototype.onKeyEnd_ = function(e) {
  * Either scroll the scrollback buffer or send a key sequence.
  */
 hterm.Keyboard.KeyMap.prototype.onKeyPageUp_ = function(e) {
-  if (!this.keyboard.pageKeysScroll ^ e.shiftKey)
+  if (!e.shiftKey)
     return '\x1b[5~';
-
   this.keyboard.terminal.scrollPageUp();
   return hterm.Keyboard.KeyActions.CANCEL;
 };
@@ -381,9 +375,8 @@ hterm.Keyboard.KeyMap.prototype.onKeyPageUp_ = function(e) {
  * Either scroll the scrollback buffer or send a key sequence.
  */
 hterm.Keyboard.KeyMap.prototype.onKeyPageDown_ = function(e) {
-  if (!this.keyboard.pageKeysScroll ^ e.shiftKey)
+  if (!e.shiftKey)
     return '\x1b[6~';
-
   this.keyboard.terminal.scrollPageDown();
   return hterm.Keyboard.KeyActions.CANCEL;
 };
@@ -446,7 +439,7 @@ hterm.Keyboard.KeyMap.prototype.onMetaN_ = function(e, keyDef) {
  * copy command.
  *
  * If there is no selection, or if the user presses Meta-Shift-C, then we'll
- * transmit an '\x1b' (if metaSendsEscape is on) followed by 'c' or 'C'.
+ * transmit an '\x1b' followed by 'c' or 'C'.
  *
  * If there is a selection, we defer to the browser.  In this case we clear out
  * the selection so the user knows we heard them, and also to give them a
@@ -456,7 +449,7 @@ hterm.Keyboard.KeyMap.prototype.onMetaC_ = function(e, keyDef) {
   var document = this.keyboard.terminal.getDocument();
   if (e.shiftKey || document.getSelection().isCollapsed) {
     // If the shift key is being held, or there is no document selection, send
-    // a Meta-C.  The keyboard code will add the ESC if metaSendsEscape is true,
+    // a Meta-C.  The keyboard code will add the ESC.
     // we just have to decide between 'c' and 'C'.
     return keyDef.keyCap.substr(e.shiftKey ? 1 : 0, 1);
   }

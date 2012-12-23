@@ -97,15 +97,6 @@ hterm.VT.CannedTests.prototype.preamble = function(result, cx) {
 };
 
 /**
- * Ensure that blink is off after the test so we don't have runaway timeouts.
- *
- * Called after each test case in this suite.
- */
-hterm.VT.CannedTests.prototype.postamble = function(result, cx) {
-  this.terminal.setCursorBlink(false);
-};
-
-/**
  * Overridden addTest method.
  *
  * This takes only a filename, and constructs a test function that will load

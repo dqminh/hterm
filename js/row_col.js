@@ -75,17 +75,6 @@
             this.overflow == that.overflow);
   };
 
-  /**
-  * Return a string representation of this instance.
-  *
-  * @return {string} A string that identifies the row and column of this
-  *     instance.
-  */
-  RowCol.prototype.toString = function() {
-    return ('[RowCol: ' + this.row + ', ' + this.column + ', ' +
-            this.overflow + ']');
-  };
-
   hterm.RowCol = RowCol;
 })(window.hterm);
 

@@ -79,5 +79,3 @@
 
   hterm.f = f;
 })(window.hterm);
-
-

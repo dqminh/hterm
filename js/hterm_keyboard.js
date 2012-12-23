@@ -35,24 +35,6 @@ hterm.Keyboard = function(terminal) {
   this.keyMap = new hterm.Keyboard.KeyMap(this);
 
   /**
-   * If true, Shift-Insert will fall through to the browser as a paste.
-   * If false, the keystroke will be sent to the host.
-   */
-  this.shiftInsertPaste = true;
-
-  /**
-   * If true, home/end will control the terminal scrollbar and shift home/end
-   * will send the VT keycodes.  If false then home/end sends VT codes and
-   * shift home/end scrolls.
-   */
-  this.homeKeysScroll = false;
-
-  /**
-   * Same as above, except for page up/page down.
-   */
-  this.pageKeysScroll = false;
-
-  /**
    * Enable/disable application keypad.
    *
    * This changes the way numeric keys are sent from the keyboard.
@@ -65,39 +47,6 @@ hterm.Keyboard = function(terminal) {
    * This changes the way cursor keys are sent from the keyboard.
    */
   this.applicationCursor = false;
-
-  /**
-   * If true, the backspace should send BS ('\x08', aka ^H).  Otherwise
-   * the backspace key should send '\x7f'.
-   */
-  this.backspaceSendsBackspace = false;
-
-  /**
-   * Set whether the meta key sends a leading escape or not.
-   */
-  this.metaSendsEscape = true;
-
-  /**
-   * Controls how the alt key is handled.
-   *
-   *  escape....... Send an ESC prefix.
-   *  8-bit........ Add 128 to the unshifted character as in xterm.
-   *  browser-key.. Wait for the keypress event and see what the browser says.
-   *                (This won't work well on platforms where the browser
-   *                 performs a default action for some alt sequences.)
-   *
-   * This setting only matters when alt is distinct from meta (altIsMeta is
-   * false.)
-   */
-  this.altSendsWhat = 'escape';
-
-  /**
-   * Set whether the alt key acts as a meta key, instead of producing 8-bit
-   * characters.
-   *
-   * True to enable, false to disable, null to autodetect based on platform.
-   */
-  this.altIsMeta = false;
 };
 
 /**
@@ -209,22 +158,8 @@ hterm.Keyboard.prototype.onTextInput_ = function(e) {
  * Handle onKeyPress events.
  */
 hterm.Keyboard.prototype.onKeyPress_ = function(e) {
-  var code;
-
-  if (e.altKey && this.altSendsWhat == 'browser-key' && e.charCode == 0) {
-    // If we got here because we were expecting the browser to handle an
-    // alt sequence but it didn't do it, then we might be on an OS without
-    // an enabled IME system.  In that case we fall back to xterm-like
-    // behavior.
-    //
-    // This happens here only as a fallback.  Typically these platforms should
-    // set altSendsWhat to either 'escape' or '8-bit'.
-    var ch = String.fromCharCode(e.keyCode);
-    if (!e.shiftKey)
-      ch = ch.toLowerCase();
-    code = ch.charCodeAt(0) + 128;
-
-  } else if (e.charCode >= 32) {
+  var code, ch;
+  if (e.charCode >= 32) {
     ch = e.charCode;
   }
 
@@ -278,8 +213,8 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
 
   var shift = e.shiftKey;
   var control = e.ctrlKey;
-  var alt = this.altIsMeta ? false : e.altKey;
-  var meta = this.altIsMeta ? (e.altKey || e.metaKey) : e.metaKey;
+  var alt = e.altKey;
+  var meta = e.altKey || e.metaKey;
 
   var action;
 
@@ -291,14 +226,6 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
     action = getAction('meta');
   } else {
     action = getAction('normal');
-  }
-
-  if (alt && this.altSendsWhat == 'browser-key' && action == DEFAULT) {
-    // When altSendsWhat is 'browser-key', we wait for the keypress event.
-    // In keypress, the browser should have set the event.charCode to the
-    // appropriate character.
-    // TODO(rginda): Character compositions will need some black magic.
-    action = PASS;
   }
 
   if (action === PASS || (action === DEFAULT && !(control || alt || meta))) {
@@ -379,29 +306,25 @@ hterm.Keyboard.prototype.onKeyDown_ = function(e) {
 
   } else {
     // Just send it as-is.
+    // TODO: check this with the original code, i think somehthing is wrong
 
     if (action === DEFAULT) {
       if (control) {
-	var unshifted = keyDef.keyCap.substr(0, 1);
-	var code = unshifted.charCodeAt(0);
-	if (code >= 64 && code <= 95) {
-	action = String.fromCharCode(code - 64);
-	}
-      } else if (alt && this.altSendsWhat == '8-bit') {
-	var ch = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
-	var code = ch.charCodeAt(0) + 128;
-	action = this.terminal.vt.encodeUTF8(String.fromCharCode(code));
-      } else {
-	action = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
+        var unshifted = keyDef.keyCap.substr(0, 1);
+        var code = unshifted.charCodeAt(0);
+        if (code >= 64 && code <= 95) {
+          action = String.fromCharCode(code - 64);
+        } else {
+          action = keyDef.keyCap.substr((e.shiftKey ? 1 : 0), 1);
+        }
       }
-    }
 
-    // We respect alt/metaSendsEscape even if the keymap action was a literal
-    // string.  Otherwise, every overridden alt/meta action would have to
-    // check alt/metaSendsEscape.
-    if ((alt && this.altSendsWhat == 'escape') ||
-	(meta && this.metaSendsEscape)) {
-      action = '\x1b' + action;
+      // We respect alt even if the keymap action was a literal
+      // string. Otherwise, every overridden alt/meta action would have to
+      // check alt.
+      if ((alt) || (meta)) {
+        action = '\x1b' + action;
+      }
     }
   }
 

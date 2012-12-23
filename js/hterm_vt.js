@@ -59,9 +59,6 @@ hterm.VT = function(terminal) {
   // Whether or not to respect the escape codes for setting terminal width.
   this.allowColumnWidthChanges_ = false;
 
-  // True if we should fake-out mouse "cell motion" reporting (DECSET 1002)
-  this.mouseCellMotionTrick_ = false;
-
   // Construct a regular expression to match the known one-byte control chars.
   // This is used in parseUnknown_ to quickly scan a string for the next
   // control character.
@@ -73,19 +70,6 @@ hterm.VT = function(terminal) {
 
   // Decoder to maintain UTF-8 decode state.
   this.utf8Decoder_ = new hterm.UTF8Decoder();
-
-  /**
-   * Whether to accept the 8-bit control characters.
-   *
-   * An 8-bit control character is one with the eighth bit set.  These
-   * didn't work on 7-bit terminals so they all have two byte equivalents.
-   * Most hosts still only use the two-byte versions.
-   *
-   * We ignore 8-bit control codes by default.  This is in order to avoid
-   * issues with "accidental" usage of codes that need to be terminated.
-   * The "accident" usually involves cat'ing binary data.
-   */
-  this.enable8BitControl = false;
 
   /**
    * Whether to allow the OSC 52 sequence to write to the system clipboard.
@@ -342,15 +326,6 @@ hterm.VT.prototype.reset = function() {
   this.terminal.setSelectionEnabled(true);
 };
 
-hterm.VT.prototype.setMouseCellMotionTrick = function(state) {
-  this.mouseCellMotionTrick_ = state;
-
-  if ((state && this.mouseReport_ == this.MOUSE_REPORT_DRAG) ||
-      (!state && this.mouseReport_ == this.MOUSE_REPORT_CLICK_1002)) {
-    this.setDECMode('1002', true);
-  }
-};
-
 /**
  * Handle terminal mouse events.
  *
@@ -367,7 +342,7 @@ hterm.VT.prototype.onTerminalMouse_ = function(e) {
   var mod = 0;
   if (e.shiftKey)
     mod |= 4;
-  if (e.metaKey || (this.terminal.keyboard.altIsMeta && e.altKey))
+  if (e.metaKey)
     mod |= 8;
   if (e.ctrlKey)
     mod |= 16;
@@ -665,7 +640,7 @@ hterm.VT.prototype.dispatch = function(type, code, parseState) {
     return;
   }
 
-  if (type == 'CC1' && code > '\x7f' && !this.enable8BitControl) {
+  if (type == 'CC1' && code > '\x7f') {
     // It's kind of a hack to put this here, but...
     //
     // If we're dispatching a 'CC1' code, and it's got the eighth bit set,
@@ -800,7 +775,6 @@ hterm.VT.prototype.setDECMode = function(code, state) {
       break;
 
     case '12':  // att610
-      this.terminal.setCursorBlink(state);
       break;
 
     case '25':  // DECTCEM
@@ -816,7 +790,6 @@ hterm.VT.prototype.setDECMode = function(code, state) {
       break;
 
     case '67':  // DECBKM
-      this.terminal.keyboard.backspaceSendsBackspace = state;
       break;
 
     case '1000':  // Report on mouse clicks only.
@@ -830,10 +803,6 @@ hterm.VT.prototype.setDECMode = function(code, state) {
 	this.mouseReport_ = this.MOUSE_REPORT_DISABLED;
 	this.terminal.setSelectionEnabled(true);
 
-      } else if (this.mouseCellMotionTrick_) {
-	this.mouseReport_ = this.MOUSE_REPORT_CLICK_1002;
-	this.terminal.setSelectionEnabled(true);
-
       } else {
 	this.mouseReport_ = this.MOUSE_REPORT_DRAG;
 	this.terminal.setSelectionEnabled(false);
@@ -841,15 +810,12 @@ hterm.VT.prototype.setDECMode = function(code, state) {
       break;
 
     case '1010':  // rxvt
-      this.terminal.scrollOnOutput = state;
       break;
 
     case '1011':  // rxvt
-      this.terminal.scrollOnKeystroke = state;
       break;
 
     case '1036':  // no-spec
-      this.terminal.keyboard.metaSendsEscape = state;
       break;
 
     case '1039':  // no-spec

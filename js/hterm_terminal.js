@@ -28,7 +28,9 @@ hterm.Terminal = function(preference) {
   // preference object of the terminal
   this.prefs_ = hterm.DefaultPreference();
   if (preference !== undefined) {
-    this.prefs_ = hterm.f.extend(this.prefs_, preference);
+    for (var attrname in preference) {
+      this.prefs_[attrname] = preference[attrname];
+    }
   }
   // Two screen instances.
   this.primaryScreen_ = new hterm.Screen();
@@ -78,8 +80,6 @@ hterm.Terminal = function(preference) {
 
   // These prefs are cached so we don't have to read from local storage with
   // each output and keystroke.  They are initialized by the preference manager.
-  this.scrollOnOutput_ = null;
-  this.scrollOnKeystroke_ = null;
   this.foregroundColor_ = null;
   this.backgroundColor_ = null;
 
@@ -132,29 +132,17 @@ hterm.Terminal.prototype.setPreference = function() {
   if (!/^(escape|8-bit|browser-key)$/.test(this.prefs_['alt-sends-what']))
     this.prefs_['alt-sends-what'] = 'escape';
 
-  this.keyboard.altIsMeta = this.prefs_['alt-is-meta']
-  this.keyboard.altSendsWhat = this.prefs_['alt-sends-what'];
-  this.keyboard.backspaceSendsBackspace = this.prefs_['backspace-sends-backspace'];
-  this.keyboard.shiftInsertPaste = this.prefs_['shift-insert-paste'];
-  this.keyboard.pageKeysScroll = this.prefs_['page-keys-scroll'];
-  this.keyboard.metaSendsEscape = this.prefs_['meta-sends-escape'];
-  this.keyboard.homeKeysScroll = this.prefs_['home-keys-scroll'];
-
   this.vt.enable8BitControl = !!this.prefs_['enable-8-bit-control'];
   this.vt.maxStringSequence = this.prefs_['max-string-sequence'];
-  this.vt.setMouseCellMotionTrick(this.prefs_['mouse-cell-motion-trick']);
 
   this.setBackgroundColor(this.prefs_['background-color']);
-  this.setCursorBlink(!!this.prefs_['cursor-blink']);
+  this.setCursorBlink();
   this.setCursorColor(this.prefs_['cursor-color']);
   this.syncBoldSafeState();
   this.syncFontFamily();
   this.setFontSize(this.prefs_['font-size']);
   this.setForegroundColor(this.prefs_['foreground-color']);
   this.syncMousePasteButton();
-  this.scrollOnKeystroke_ = this.prefs_['scroll-on-keystroke'];
-  this.scrollOnOutput_ = this.prefs_['scroll-on-output'];
-  this.setScrollbarVisible(this.prefs_['scrollbar-visible']);
 };
 
 
@@ -327,16 +315,12 @@ hterm.Terminal.prototype.syncFontFamily = function() {
 };
 
 /**
- * Set this.mousePasteButton based on the mouse-paste-button pref,
- * autodetecting if necessary.
+ * Set this.mousePasteButton
+ * We'll try to enable middle button paste for non-X11
+ * platforms.
+ * On X11 we move it to button 3
  */
 hterm.Terminal.prototype.syncMousePasteButton = function() {
-  var button = this.prefs_['mouse-paste-button'];
-  if (typeof button == 'number') {
-    this.mousePasteButton = button;
-    return;
-  }
-
   var ary = navigator.userAgent.match(/\(X11;\s+(\S+)/);
   if (!ary || ary[2] == 'CrOS') {
     this.mousePasteButton = 2;
@@ -350,21 +334,13 @@ hterm.Terminal.prototype.syncMousePasteButton = function() {
  * necessary.
  */
 hterm.Terminal.prototype.syncBoldSafeState = function() {
-  var enableBold = this.prefs_['enable-bold'];
-  if (enableBold !== null) {
-    this.primaryScreen_.textAttributes.enableBold = enableBold;
-    this.alternateScreen_.textAttributes.enableBold = enableBold;
-    return;
-  }
-
   var normalSize = this.scrollPort_.measureCharacterSize();
   var boldSize = this.scrollPort_.measureCharacterSize('bold');
 
   var isBoldSafe = normalSize.equals(boldSize);
   if (!isBoldSafe) {
     console.warn('Bold characters disabled: Size of bold weight differs ' +
-		 'from normal.  Font family is: ' +
-		 this.scrollPort_.getFontFamily());
+		 'from normal.  Font family is: ' + this.scrollPort_.getFontFamily());
   }
 
   this.primaryScreen_.textAttributes.enableBold = isBoldSafe;
@@ -613,7 +589,7 @@ hterm.Terminal.prototype.reset = function() {
   this.clearHome(this.alternateScreen_);
   this.alternateScreen_.textAttributes.reset();
 
-  this.setCursorBlink(!!this.prefs_['cursor-blink']);
+  this.setCursorBlink();
 
   this.softReset();
 };
@@ -772,8 +748,6 @@ hterm.Terminal.prototype.decorate = function(div) {
   this.setFontSize(this.prefs_['font-size']);
   this.syncFontFamily();
 
-  this.setScrollbarVisible(this.prefs_['scrollbar-visible']);
-
   this.document_ = this.scrollPort_.getDocument();
 
   this.document_.body.oncontextmenu = function() { return false };
@@ -841,7 +815,7 @@ hterm.Terminal.prototype.decorate = function(div) {
       setTimeout(this.focus.bind(this));
     }.bind(this));
 
-  this.setCursorBlink(!!this.prefs_['cursor-blink']);
+  this.setCursorBlink();
   this.setReverseVideo(false);
 
   // setting all preferences before the terminal is ready to be used
@@ -1077,9 +1051,6 @@ hterm.Terminal.prototype.print = function(str) {
   }
 
   this.scheduleSyncCursorPosition_();
-
-  if (this.scrollOnOutput_)
-    this.scrollPort_.scrollRowToBottom(this.getRowCount());
 };
 
 /**
@@ -1780,26 +1751,9 @@ hterm.Terminal.prototype.setAlternateMode = function(state) {
 };
 
 /**
- * Set the cursor-blink mode bit.
- *
- * If cursor-blink is on, the cursor will blink when it is visible.  Otherwise
- * a visible cursor does not blink.
- *
- * You should make sure to turn blinking off if you're going to dispose of a
- * terminal, otherwise you'll leak a timeout.
- *
- * Defaults to on.
- *
- * @param {boolean} state True to set cursor-blink mode, false to unset.
+ * Turn-off cursor blank
  */
-hterm.Terminal.prototype.setCursorBlink = function(state) {
-  this.options_.cursorBlink = state;
-
-  if (!state && this.timeouts_.cursorBlink) {
-    clearTimeout(this.timeouts_.cursorBlink);
-    delete this.timeouts_.cursorBlink;
-  }
-
+hterm.Terminal.prototype.setCursorBlink = function() {
   if (this.options_.cursorVisible)
     this.setCursorVisible(true);
 };
@@ -1824,19 +1778,6 @@ hterm.Terminal.prototype.setCursorVisible = function(state) {
   this.syncCursorPosition_();
 
   this.cursorNode_.style.opacity = '1';
-
-  if (this.options_.cursorBlink) {
-    if (this.timeouts_.cursorBlink)
-      return;
-
-    this.timeouts_.cursorBlink = setInterval(this.onCursorBlink_.bind(this),
-					     500);
-  } else {
-    if (this.timeouts_.cursorBlink) {
-      clearTimeout(this.timeouts_.cursorBlink);
-      delete this.timeouts_.cursorBlink;
-    }
-  }
 };
 
 /**
@@ -2040,9 +1981,7 @@ hterm.Terminal.prototype.copySelectionToClipboard = function() {
  * @param {string} string The VT string representing the keystroke.
  */
 hterm.Terminal.prototype.onVTKeystroke = function(string) {
-  if (this.scrollOnKeystroke_)
-    this.scrollPort_.scrollRowToBottom(this.getRowCount());
-
+  this.scrollPort_.scrollRowToBottom(this.getRowCount());
   this.io.onVTKeystroke(string);
 };
 
@@ -2172,29 +2111,4 @@ hterm.Terminal.prototype.onResize_ = function() {
   this.showZoomWarning_(this.scrollPort_.characterSize.zoomFactor != 1);
 
   this.scheduleSyncCursorPosition_();
-};
-
-/**
- * Service the cursor blink timeout.
- */
-hterm.Terminal.prototype.onCursorBlink_ = function() {
-  if (this.cursorNode_.style.opacity == '0') {
-    this.cursorNode_.style.opacity = '1';
-  } else {
-    this.cursorNode_.style.opacity = '0';
-  }
-};
-
-/**
- * Set the scrollbar-visible mode bit.
- *
- * If scrollbar-visible is on, the vertical scrollbar will be visible.
- * Otherwise it will not.
- *
- * Defaults to on.
- *
- * @param {boolean} state True to set scrollbar-visible mode, false to unset.
- */
-hterm.Terminal.prototype.setScrollbarVisible = function(state) {
-  this.scrollPort_.setScrollbarVisible(state);
 };

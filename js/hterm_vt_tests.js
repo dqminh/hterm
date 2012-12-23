@@ -48,15 +48,6 @@ hterm.VT.Tests.prototype.preamble = function(result, cx) {
 };
 
 /**
- * Ensure that blink is off after the test so we don't have runaway timeouts.
- *
- * Called after each test case in this suite.
- */
-hterm.VT.Tests.prototype.postamble = function(result, cx) {
-  this.terminal.setCursorBlink(false);
-};
-
-/**
  * Overridden addTest method.
  *
  * Every test in this suite needs to wait for the terminal initialization to
@@ -226,45 +217,6 @@ hterm.VT.Tests.addTest('double-sequence', function(result, cx) {
 
     var text = this.terminal.getRowsText(0, 3);
     result.assertEQ(text, 'line one\nline two\nline three');
-    result.pass();
-  });
-
-/**
- * Test that 8-bit control characters are properly ignored.
- */
-hterm.VT.Tests.addTest('8-bit-control', function(result, cx) {
-    var title = null;
-    this.terminal.setWindowTitle = function(t) {
-      // Set a default title so we can catch the potential for this function
-      // to be called on accident with no parameter.
-      title = t || 'XXX';
-    };
-
-    result.assertEQ(this.terminal.vt.enable8BitControl, false);
-
-    // Send a "set window title" command using a disabled 8-bit
-    // control. It's a C1 control, so we interpret it after UTF-8
-    // decoding.
-    this.terminal.interpret('\xc2\x9d0;test title\x07!!');
-
-    result.assertEQ(title, null);
-    result.assertEQ(this.terminal.getRowsText(0, 1), '0;test title!!');
-
-    // Try again with the two-byte version of the code.
-    title = null;
-    this.terminal.reset();
-    this.terminal.interpret('\x1b]0;test title\x07!!');
-    result.assertEQ(title, 'test title');
-    result.assertEQ(this.terminal.getRowsText(0, 1), '!!');
-
-    // Now enable 8-bit control and see how it goes.
-    title = null;
-    this.terminal.reset();
-    this.terminal.vt.enable8BitControl = true;
-    this.terminal.interpret('\xc2\x9d0;test title\x07!!');
-    result.assertEQ(title, 'test title');
-    result.assertEQ(this.terminal.getRowsText(0, 1), '!!');
-
     result.pass();
   });
 
@@ -882,16 +834,6 @@ hterm.VT.Tests.addTest('mode-bits', function(result, cx) {
     this.terminal.interpret('\x1b[?7l');
     result.assertEQ(this.terminal.options_.wraparound, false);
 
-    /*
-    this.terminal.interpret('\x1b[?12l');
-    result.assertEQ(this.terminal.options_.cursorBlink, false);
-    result.assert(!('cursorBlink' in this.terminal.timeouts_));
-
-    this.terminal.interpret('\x1b[?12h');
-    result.assertEQ(this.terminal.options_.cursorBlink, true);
-    result.assert('cursorBlink' in this.terminal.timeouts_);
-    */
-
     this.terminal.interpret('\x1b[?25l');
     result.assertEQ(this.terminal.options_.cursorVisible, false);
     result.assertEQ(this.terminal.cursorNode_.style.opacity, '0');
@@ -908,18 +850,6 @@ hterm.VT.Tests.addTest('mode-bits', function(result, cx) {
 
     this.terminal.interpret('\x1b[?45l');
     result.assertEQ(this.terminal.options_.reverseWraparound, false);
-
-    this.terminal.interpret('\x1b[?67h');
-    result.assertEQ(this.terminal.keyboard.backspaceSendsBackspace, true);
-
-    this.terminal.interpret('\x1b[?67l');
-    result.assertEQ(this.terminal.keyboard.backspaceSendsBackspace, false);
-
-    this.terminal.interpret('\x1b[?1036h');
-    result.assertEQ(this.terminal.keyboard.metaSendsEscape, true);
-
-    this.terminal.interpret('\x1b[?1036l');
-    result.assertEQ(this.terminal.keyboard.metaSendsEscape, false);
 
     this.terminal.interpret('\x1b[?1039h');
     result.assertEQ(this.terminal.keyboard.altSendsEscape, true);
