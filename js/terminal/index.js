@@ -110,7 +110,6 @@
     this.enableMouseDragScroll = true;
 
     this.copyOnSelect = null;
-    this.mousePasteButton = null;
 
     this.realizeSize_(80, 24);
     this.setDefaultTabStops();
@@ -147,7 +146,6 @@
     this.syncFontFamily();
     this.setFontSize(this.prefs_['font-size']);
     this.setForegroundColor(this.prefs_['foreground-color']);
-    this.syncMousePasteButton();
   };
 
 
@@ -317,21 +315,6 @@
     this.scrollPort_.setFontFamily(this.prefs_['font-family'],
         this.prefs_['font-smoothing']);
     this.syncBoldSafeState();
-  };
-
-  /**
-   * Set this.mousePasteButton
-   * We'll try to enable middle button paste for non-X11
-   * platforms.
-   * On X11 we move it to button 3
-   */
-  Terminal.prototype.syncMousePasteButton = function() {
-    var ary = navigator.userAgent.match(/\(X11;\s+(\S+)/);
-    if (!ary || ary[2] == 'CrOS') {
-      this.mousePasteButton = 2;
-    } else {
-      this.mousePasteButton = 3;
-    }
   };
 
   /**
@@ -1880,13 +1863,6 @@
     };
 
     /**
-     * Paste from the system clipboard to the terminal.
-     */
-    Terminal.prototype.paste = function() {
-      pasteFromClipboard(this.document_);
-    };
-
-    /**
      * Copy a string to the system clipboard.
      *
      * Note: If there is a selected range in the terminal, it'll be cleared.
@@ -2010,11 +1986,6 @@
       }
 
       e.processedByTerminalHandler_ = true;
-
-      if (e.type == 'mousedown' && e.which == this.mousePasteButton) {
-        this.paste();
-        return;
-      }
 
       if (e.type == 'mouseup' && e.which == 1 && this.copyOnSelect &&
           !this.document_.getSelection().isCollapsed) {
