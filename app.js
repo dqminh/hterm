@@ -8,7 +8,7 @@ var termServer = sockjs.createServer();
 var httpServer = http.createServer();
 var environment = new Mincer.Environment();
 environment.appendPath('js');
-environment.appendPath('spec');
+environment.appendPath('test');
 
 var assetsServer = Mincer.createServer(environment);
 var staticDir = new nodeStatic.Server(__dirname);
