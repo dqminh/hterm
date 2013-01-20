@@ -109,11 +109,19 @@
     // True if mouse-click-drag should scroll the terminal.
     this.enableMouseDragScroll = true;
 
-    this.copyOnSelect = null;
+    // set copySource for copy support
+    this.copySource = this.document_.createElement('textarea');
+    this.copySource.style.cssText = (
+        '-webkit-user-select: text;' +
+        'position: absolute;' +
+        'padding: 0;' +
+        'width: 0px;' +
+        'outline: none;' +
+        'top: -99px');
+    this.document_.body.appendChild(this.copySource);
 
     this.realizeSize_(80, 24);
     this.setDefaultTabStops();
-    this.listenToSelection();
   };
 
   /**
@@ -759,1359 +767,1337 @@
         '  border-width: 2px;' +
         '  border-style: solid;' +
         '}');
-      this.document_.head.appendChild(style);
+    this.document_.head.appendChild(style);
 
-      this.cursorNode_ = this.document_.createElement('div');
-      this.cursorNode_.className = 'cursor-node';
-      this.cursorNode_.style.cssText =
-        ('position: absolute;' +
-         'top: -99px;' +
-         'display: block;' +
-         'width: ' + this.scrollPort_.characterSize.width + 'px;' +
-         'height: ' + this.scrollPort_.characterSize.height + 'px;' +
-         '-webkit-transition: opacity, background-color 100ms linear;');
-      this.setCursorColor(this.prefs_['cursor-color']);
+    this.cursorNode_ = this.document_.createElement('div');
+    this.cursorNode_.className = 'cursor-node';
+    this.cursorNode_.style.cssText =
+      ('position: absolute;' +
+        'top: -99px;' +
+        'display: block;' +
+        'width: ' + this.scrollPort_.characterSize.width + 'px;' +
+        'height: ' + this.scrollPort_.characterSize.height + 'px;' +
+        '-webkit-transition: opacity, background-color 100ms linear;');
+    this.setCursorColor(this.prefs_['cursor-color']);
 
-      this.document_.body.appendChild(this.cursorNode_);
+    this.document_.body.appendChild(this.cursorNode_);
 
-      // When 'enableMouseDragScroll' is off we reposition this element directly
-      // under the mouse cursor after a click.  This makes Chrome associate
-      // subsequent mousemove events with the scroll-blocker.  Since the
-      // scroll-blocker is a peer (not a child) of the scrollport, the mousemove
-      // events do not cause the scrollport to scroll.
-      //
-      // It's a hack, but it's the cleanest way I could find.
-      this.scrollBlockerNode_ = this.document_.createElement('div');
-      this.scrollBlockerNode_.style.cssText =
-        ('position: absolute;' +
-         'top: -99px;' +
-         'display: block;' +
-         'width: 10px;' +
-         'height: 10px;');
-      this.document_.body.appendChild(this.scrollBlockerNode_);
+    // When 'enableMouseDragScroll' is off we reposition this element directly
+    // under the mouse cursor after a click.  This makes Chrome associate
+    // subsequent mousemove events with the scroll-blocker.  Since the
+    // scroll-blocker is a peer (not a child) of the scrollport, the mousemove
+    // events do not cause the scrollport to scroll.
+    //
+    // It's a hack, but it's the cleanest way I could find.
+    this.scrollBlockerNode_ = this.document_.createElement('div');
+    this.scrollBlockerNode_.style.cssText =
+      ('position: absolute;' +
+        'top: -99px;' +
+        'display: block;' +
+        'width: 10px;' +
+        'height: 10px;');
+    this.document_.body.appendChild(this.scrollBlockerNode_);
 
-      var onMouse = this.onMouse_.bind(this);
-      this.scrollPort_.onScrollWheel = onMouse;
-      ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick',
-        ].forEach(function(event) {
-          this.scrollBlockerNode_.addEventListener(event, onMouse);
-          this.cursorNode_.addEventListener(event, onMouse);
-          this.document_.addEventListener(event, onMouse);
-        }.bind(this));
-
-      this.cursorNode_.addEventListener('mousedown', function() {
-        setTimeout(this.focus.bind(this));
+    var onMouse = this.onMouse_.bind(this);
+    this.scrollPort_.onScrollWheel = onMouse;
+    ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick',
+      ].forEach(function(event) {
+        this.scrollBlockerNode_.addEventListener(event, onMouse);
+        this.cursorNode_.addEventListener(event, onMouse);
+        this.document_.addEventListener(event, onMouse);
       }.bind(this));
 
-      this.setCursorBlink();
-      this.setReverseVideo(false);
+    this.cursorNode_.addEventListener('mousedown', function() {
+      setTimeout(this.focus.bind(this));
+    }.bind(this));
 
-      // setting all preferences before the terminal is ready to be used
-      this.setPreference();
+    this.setCursorBlink();
+    this.setReverseVideo(false);
 
-      this.scrollPort_.focus();
-      this.scrollPort_.scheduleRedraw();
-      };
+    // setting all preferences before the terminal is ready to be used
+    this.setPreference();
 
-    /**
-     * Return the HTML document that contains the terminal DOM nodes.
-     */
-    Terminal.prototype.getDocument = function() {
-      return this.document_;
-    };
+    this.scrollPort_.focus();
+    this.scrollPort_.scheduleRedraw();
+  };
 
-    /**
-     * Focus the terminal.
-     */
-    Terminal.prototype.focus = function() {
-      this.scrollPort_.focus();
-    };
+  /**
+    * Return the HTML document that contains the terminal DOM nodes.
+    */
+  Terminal.prototype.getDocument = function() {
+    return this.document_;
+  };
 
-    /**
-     * Return the HTML Element for a given row index.
-     *
-     * This is a method from the RowProvider interface.  The ScrollPort uses
-     * it to fetch rows on demand as they are scrolled into view.
-     *
-     * TODO(rginda): Consider saving scrollback rows as (HTML source, text content)
-     * pairs to conserve memory.
-     *
-     * @param {integer} index The zero-based row index, measured relative to the
-     *     start of the scrollback buffer.  On-screen rows will always have the
-     *     largest indicies.
-     * @return {HTMLElement} The 'x-row' element containing for the requested row.
-     */
-    Terminal.prototype.getRowNode = function(index) {
-      if (index < this.scrollbackRows_.length)
-        return this.scrollbackRows_[index];
+  /**
+    * Focus the terminal.
+    */
+  Terminal.prototype.focus = function() {
+    this.scrollPort_.focus();
+  };
 
-      var screenIndex = index - this.scrollbackRows_.length;
-      return this.screen_.rowsArray[screenIndex];
-    };
+  /**
+    * Return the HTML Element for a given row index.
+    *
+    * This is a method from the RowProvider interface.  The ScrollPort uses
+    * it to fetch rows on demand as they are scrolled into view.
+    *
+    * TODO(rginda): Consider saving scrollback rows as (HTML source, text content)
+    * pairs to conserve memory.
+    *
+    * @param {integer} index The zero-based row index, measured relative to the
+    *     start of the scrollback buffer.  On-screen rows will always have the
+    *     largest indicies.
+    * @return {HTMLElement} The 'x-row' element containing for the requested row.
+    */
+  Terminal.prototype.getRowNode = function(index) {
+    if (index < this.scrollbackRows_.length)
+      return this.scrollbackRows_[index];
 
-    /**
-     * Return the text content for a given range of rows.
-     *
-     * This is a method from the RowProvider interface.  The ScrollPort uses
-     * it to fetch text content on demand when the user attempts to copy their
-     * selection to the clipboard.
-     *
-     * @param {integer} start The zero-based row index to start from, measured
-     *     relative to the start of the scrollback buffer.  On-screen rows will
-     *     always have the largest indicies.
-     * @param {integer} end The zero-based row index to end on, measured
-     *     relative to the start of the scrollback buffer.
-     * @return {string} A single string containing the text value of the range of
-     *     rows.  Lines will be newline delimited, with no trailing newline.
-     */
-    Terminal.prototype.getRowsText = function(start, end) {
-      var ary = [];
-      for (var i = start; i < end; i++) {
-        var node = this.getRowNode(i);
-        ary.push(node.textContent);
-        if (i < end - 1 && !node.getAttribute('line-overflow'))
-          ary.push('\n');
-      }
+    var screenIndex = index - this.scrollbackRows_.length;
+    return this.screen_.rowsArray[screenIndex];
+  };
 
-      return ary.join('');
-    };
-
-    /**
-     * Return the text content for a given row.
-     *
-     * This is a method from the RowProvider interface.  The ScrollPort uses
-     * it to fetch text content on demand when the user attempts to copy their
-     * selection to the clipboard.
-     *
-     * @param {integer} index The zero-based row index to return, measured
-     *     relative to the start of the scrollback buffer.  On-screen rows will
-     *     always have the largest indicies.
-     * @return {string} A string containing the text value of the selected row.
-     */
-    Terminal.prototype.getRowText = function(index) {
-      var node = this.getRowNode(index);
-      return node.textContent;
-    };
-
-    /**
-     * Return the total number of rows in the addressable screen and in the
-     * scrollback buffer of this terminal.
-     *
-     * This is a method from the RowProvider interface.  The ScrollPort uses
-     * it to compute the size of the scrollbar.
-     *
-     * @return {integer} The number of rows in this terminal.
-     */
-    Terminal.prototype.getRowCount = function() {
-      return this.scrollbackRows_.length + this.screen_.rowsArray.length;
-    };
-
-    /**
-     * Create DOM nodes for new rows and append them to the end of the terminal.
-     *
-     * This is the only correct way to add a new DOM node for a row.  Notice that
-     * the new row is appended to the bottom of the list of rows, and does not
-     * require renumbering (of the rowIndex property) of previous rows.
-     *
-     * If you think you want a new blank row somewhere in the middle of the
-     * terminal, look into moveRows_().
-     *
-     * This method does not pay attention to vtScrollTop/Bottom, since you should
-     * be using moveRows() in cases where they would matter.
-     *
-     * The cursor will be positioned at column 0 of the first inserted line.
-     */
-    Terminal.prototype.appendRows_ = function(count) {
-      var cursorRow = this.screen_.rowsArray.length;
-      var offset = this.scrollbackRows_.length + cursorRow;
-      for (var i = 0; i < count; i++) {
-        var row = this.document_.createElement('x-row');
-        row.appendChild(this.document_.createTextNode(''));
-        row.rowIndex = offset + i;
-        this.screen_.pushRow(row);
-      }
-
-      var extraRows = this.screen_.rowsArray.length - this.screenSize.height;
-      if (extraRows > 0) {
-        var ary = this.screen_.shiftRows(extraRows);
-        Array.prototype.push.apply(this.scrollbackRows_, ary);
-        if (this.scrollPort_.isScrolledEnd)
-          this.scheduleScrollDown_();
-      }
-
-      if (cursorRow >= this.screen_.rowsArray.length)
-        cursorRow = this.screen_.rowsArray.length - 1;
-
-      this.setAbsoluteCursorPosition(cursorRow, 0);
-    };
-
-    /**
-     * Relocate rows from one part of the addressable screen to another.
-     *
-     * This is used to recycle rows during VT scrolls (those which are driven
-     * by VT commands, rather than by the user manipulating the scrollbar.)
-     *
-     * In this case, the blank lines scrolled into the scroll region are made of
-     * the nodes we scrolled off.  These have their rowIndex properties carefully
-     * renumbered so as not to confuse the ScrollPort.
-     */
-    Terminal.prototype.moveRows_ = function(fromIndex, count, toIndex) {
-      var ary = this.screen_.removeRows(fromIndex, count);
-      this.screen_.insertRows(toIndex, ary);
-
-      var start, end;
-      if (fromIndex < toIndex) {
-        start = fromIndex;
-        end = toIndex + count;
-      } else {
-        start = toIndex;
-        end = fromIndex + count;
-      }
-
-      this.renumberRows_(start, end);
-      this.scrollPort_.scheduleInvalidate();
-    };
-
-    /**
-     * Renumber the rowIndex property of the given range of rows.
-     *
-     * The start and end indicies are relative to the screen, not the scrollback.
-     * Rows in the scrollback buffer cannot be renumbered.  Since they are not
-     * addressable (you can't delete them, scroll them, etc), you should have
-     * no need to renumber scrollback rows.
-     */
-    Terminal.prototype.renumberRows_ = function(start, end) {
-      var offset = this.scrollbackRows_.length;
-      for (var i = start; i < end; i++) {
-        this.screen_.rowsArray[i].rowIndex = offset + i;
-      }
-    };
-
-    /**
-     * Print a string to the terminal.
-     *
-     * This respects the current insert and wraparound modes.  It will add new lines
-     * to the end of the terminal, scrolling off the top into the scrollback buffer
-     * if necessary.
-     *
-     * The string is *not* parsed for escape codes.  Use the interpret() method if
-     * that's what you're after.
-     *
-     * @param{string} str The string to print.
-     */
-    Terminal.prototype.print = function(str) {
-      var startOffset = 0;
-
-      while (startOffset < str.length) {
-        if (this.options_.wraparound && this.screen_.cursorPosition.overflow) {
-          this.screen_.commitLineOverflow();
-          this.newLine();
-        }
-
-        var count = str.length - startOffset;
-        var didOverflow = false;
-        var substr;
-
-        if (this.screen_.cursorPosition.column + count >= this.screenSize.width) {
-          didOverflow = true;
-          count = this.screenSize.width - this.screen_.cursorPosition.column;
-        }
-
-        if (didOverflow && !this.options_.wraparound) {
-          // If the string overflowed the line but wraparound is off, then the
-          // last printed character should be the last of the string.
-          // TODO: This will add to our problems with multibyte UTF-16 characters.
-          substr = str.substr(startOffset, count - 1) +
-            str.substr(str.length - 1);
-          count = str.length;
-        } else {
-          substr = str.substr(startOffset, count);
-        }
-
-        if (this.options_.insertMode) {
-          this.screen_.insertString(substr);
-        } else {
-          this.screen_.overwriteString(substr);
-        }
-
-        this.screen_.maybeClipCurrentRow();
-        startOffset += count;
-      }
-
-      this.scheduleSyncCursorPosition_();
-    };
-
-    /**
-     * Set the VT scroll region.
-     *
-     * This also resets the cursor position to the absolute (0, 0) position, since
-     * that's what xterm appears to do.
-     *
-     * @param {integer} scrollTop The zero-based top of the scroll region.
-     * @param {integer} scrollBottom The zero-based bottom of the scroll region,
-     *     inclusive.
-     */
-    Terminal.prototype.setVTScrollRegion = function(scrollTop, scrollBottom) {
-      this.vtScrollTop_ = scrollTop;
-      this.vtScrollBottom_ = scrollBottom;
-    };
-
-    /**
-     * Return the top row index according to the VT.
-     *
-     * This will return 0 unless the terminal has been told to restrict scrolling
-     * to some lower row.  It is used for some VT cursor positioning and scrolling
-     * commands.
-     *
-     * @return {integer} The topmost row in the terminal's scroll region.
-     */
-    Terminal.prototype.getVTScrollTop = function() {
-      if (this.vtScrollTop_ != null)
-        return this.vtScrollTop_;
-
-      return 0;
-    };
-
-    /**
-     * Return the bottom row index according to the VT.
-     *
-     * This will return the height of the terminal unless the it has been told to
-     * restrict scrolling to some higher row.  It is used for some VT cursor
-     * positioning and scrolling commands.
-     *
-     * @return {integer} The bottommost row in the terminal's scroll region.
-     */
-    Terminal.prototype.getVTScrollBottom = function() {
-      if (this.vtScrollBottom_ != null)
-        return this.vtScrollBottom_;
-
-      return this.screenSize.height - 1;
+  /**
+    * Return the text content for a given range of rows.
+    *
+    * This is a method from the RowProvider interface.  The ScrollPort uses
+    * it to fetch text content on demand when the user attempts to copy their
+    * selection to the clipboard.
+    *
+    * @param {integer} start The zero-based row index to start from, measured
+    *     relative to the start of the scrollback buffer.  On-screen rows will
+    *     always have the largest indicies.
+    * @param {integer} end The zero-based row index to end on, measured
+    *     relative to the start of the scrollback buffer.
+    * @return {string} A single string containing the text value of the range of
+    *     rows.  Lines will be newline delimited, with no trailing newline.
+    */
+  Terminal.prototype.getRowsText = function(start, end) {
+    var ary = [];
+    for (var i = start; i < end; i++) {
+      var node = this.getRowNode(i);
+      ary.push(node.textContent);
+      if (i < end - 1 && !node.getAttribute('line-overflow'))
+        ary.push('\n');
     }
 
-    /**
-     * Process a '\n' character.
-     *
-     * If the cursor is on the final row of the terminal this will append a new
-     * blank row to the screen and scroll the topmost row into the scrollback
-     * buffer.
-     *
-     * Otherwise, this moves the cursor to column zero of the next row.
-     */
-    Terminal.prototype.newLine = function() {
-      if (this.screen_.cursorPosition.row == this.screen_.rowsArray.length - 1) {
-        // If we're at the end of the screen we need to append a new line and
-        // scroll the top line into the scrollback buffer.
-        this.appendRows_(1);
-      } else if (this.screen_.cursorPosition.row == this.getVTScrollBottom()) {
-        // End of the scroll region does not affect the scrollback buffer.
-        this.vtScrollUp(1);
-        this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row, 0);
-      } else {
-        // Anywhere else in the screen just moves the cursor.
-        this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row + 1, 0);
-      }
-    };
+    return ary.join('');
+  };
 
-    /**
-     * Like newLine(), except maintain the cursor column.
-     */
-    Terminal.prototype.lineFeed = function() {
-      var column = this.screen_.cursorPosition.column;
-      this.newLine();
-      this.setCursorColumn(column);
-    };
+  /**
+    * Return the text content for a given row.
+    *
+    * This is a method from the RowProvider interface.  The ScrollPort uses
+    * it to fetch text content on demand when the user attempts to copy their
+    * selection to the clipboard.
+    *
+    * @param {integer} index The zero-based row index to return, measured
+    *     relative to the start of the scrollback buffer.  On-screen rows will
+    *     always have the largest indicies.
+    * @return {string} A string containing the text value of the selected row.
+    */
+  Terminal.prototype.getRowText = function(index) {
+    var node = this.getRowNode(index);
+    return node.textContent;
+  };
 
-    /**
-     * If autoCarriageReturn is set then newLine(), else lineFeed().
-     */
-    Terminal.prototype.formFeed = function() {
-      if (this.options_.autoCarriageReturn) {
+  /**
+    * Return the total number of rows in the addressable screen and in the
+    * scrollback buffer of this terminal.
+    *
+    * This is a method from the RowProvider interface.  The ScrollPort uses
+    * it to compute the size of the scrollbar.
+    *
+    * @return {integer} The number of rows in this terminal.
+    */
+  Terminal.prototype.getRowCount = function() {
+    return this.scrollbackRows_.length + this.screen_.rowsArray.length;
+  };
+
+  /**
+    * Create DOM nodes for new rows and append them to the end of the terminal.
+    *
+    * This is the only correct way to add a new DOM node for a row.  Notice that
+    * the new row is appended to the bottom of the list of rows, and does not
+    * require renumbering (of the rowIndex property) of previous rows.
+    *
+    * If you think you want a new blank row somewhere in the middle of the
+    * terminal, look into moveRows_().
+    *
+    * This method does not pay attention to vtScrollTop/Bottom, since you should
+    * be using moveRows() in cases where they would matter.
+    *
+    * The cursor will be positioned at column 0 of the first inserted line.
+    */
+  Terminal.prototype.appendRows_ = function(count) {
+    var cursorRow = this.screen_.rowsArray.length;
+    var offset = this.scrollbackRows_.length + cursorRow;
+    for (var i = 0; i < count; i++) {
+      var row = this.document_.createElement('x-row');
+      row.appendChild(this.document_.createTextNode(''));
+      row.rowIndex = offset + i;
+      this.screen_.pushRow(row);
+    }
+
+    var extraRows = this.screen_.rowsArray.length - this.screenSize.height;
+    if (extraRows > 0) {
+      var ary = this.screen_.shiftRows(extraRows);
+      Array.prototype.push.apply(this.scrollbackRows_, ary);
+      if (this.scrollPort_.isScrolledEnd)
+        this.scheduleScrollDown_();
+    }
+
+    if (cursorRow >= this.screen_.rowsArray.length)
+      cursorRow = this.screen_.rowsArray.length - 1;
+
+    this.setAbsoluteCursorPosition(cursorRow, 0);
+  };
+
+  /**
+    * Relocate rows from one part of the addressable screen to another.
+    *
+    * This is used to recycle rows during VT scrolls (those which are driven
+    * by VT commands, rather than by the user manipulating the scrollbar.)
+    *
+    * In this case, the blank lines scrolled into the scroll region are made of
+    * the nodes we scrolled off.  These have their rowIndex properties carefully
+    * renumbered so as not to confuse the ScrollPort.
+    */
+  Terminal.prototype.moveRows_ = function(fromIndex, count, toIndex) {
+    var ary = this.screen_.removeRows(fromIndex, count);
+    this.screen_.insertRows(toIndex, ary);
+
+    var start, end;
+    if (fromIndex < toIndex) {
+      start = fromIndex;
+      end = toIndex + count;
+    } else {
+      start = toIndex;
+      end = fromIndex + count;
+    }
+
+    this.renumberRows_(start, end);
+    this.scrollPort_.scheduleInvalidate();
+  };
+
+  /**
+    * Renumber the rowIndex property of the given range of rows.
+    *
+    * The start and end indicies are relative to the screen, not the scrollback.
+    * Rows in the scrollback buffer cannot be renumbered.  Since they are not
+    * addressable (you can't delete them, scroll them, etc), you should have
+    * no need to renumber scrollback rows.
+    */
+  Terminal.prototype.renumberRows_ = function(start, end) {
+    var offset = this.scrollbackRows_.length;
+    for (var i = start; i < end; i++) {
+      this.screen_.rowsArray[i].rowIndex = offset + i;
+    }
+  };
+
+  /**
+    * Print a string to the terminal.
+    *
+    * This respects the current insert and wraparound modes.  It will add new lines
+    * to the end of the terminal, scrolling off the top into the scrollback buffer
+    * if necessary.
+    *
+    * The string is *not* parsed for escape codes.  Use the interpret() method if
+    * that's what you're after.
+    *
+    * @param{string} str The string to print.
+    */
+  Terminal.prototype.print = function(str) {
+    var startOffset = 0;
+
+    while (startOffset < str.length) {
+      if (this.options_.wraparound && this.screen_.cursorPosition.overflow) {
+        this.screen_.commitLineOverflow();
         this.newLine();
+      }
+
+      var count = str.length - startOffset;
+      var didOverflow = false;
+      var substr;
+
+      if (this.screen_.cursorPosition.column + count >= this.screenSize.width) {
+        didOverflow = true;
+        count = this.screenSize.width - this.screen_.cursorPosition.column;
+      }
+
+      if (didOverflow && !this.options_.wraparound) {
+        // If the string overflowed the line but wraparound is off, then the
+        // last printed character should be the last of the string.
+        // TODO: This will add to our problems with multibyte UTF-16 characters.
+        substr = str.substr(startOffset, count - 1) +
+          str.substr(str.length - 1);
+        count = str.length;
       } else {
-        this.lineFeed();
+        substr = str.substr(startOffset, count);
       }
-    };
 
-    /**
-     * Move the cursor up one row, possibly inserting a blank line.
-     *
-     * The cursor column is not changed.
-     */
-    Terminal.prototype.reverseLineFeed = function() {
-      var scrollTop = this.getVTScrollTop();
-      var currentRow = this.screen_.cursorPosition.row;
-
-      if (currentRow == scrollTop) {
-        this.insertLines(1);
+      if (this.options_.insertMode) {
+        this.screen_.insertString(substr);
       } else {
-        this.setAbsoluteCursorRow(currentRow - 1);
-      }
-    };
-
-    /**
-     * Replace all characters to the left of the current cursor with the space
-     * character.
-     *
-     * TODO(rginda): This should probably *remove* the characters (not just replace
-     * with a space) if there are no characters at or beyond the current cursor
-     * position.
-     */
-    Terminal.prototype.eraseToLeft = function() {
-      var cursor = this.saveCursor();
-      this.setCursorColumn(0);
-      this.screen_.overwriteString(f.getWhitespace(cursor.column + 1));
-      this.restoreCursor(cursor);
-    };
-
-    /**
-     * Erase a given number of characters to the right of the cursor.
-     *
-     * The cursor position is unchanged.
-     *
-     * If the current background color is not the default background color this
-     * will insert spaces rather than delete.  This is unfortunate because the
-     * trailing space will affect text selection, but it's difficult to come up
-     * with a way to style empty space that wouldn't trip up the hterm.Screen
-     * code.
-     */
-    Terminal.prototype.eraseToRight = function(opt_count) {
-      var maxCount = this.screenSize.width - this.screen_.cursorPosition.column;
-      var count = opt_count ? Math.min(opt_count, maxCount) : maxCount;
-
-      if (this.screen_.textAttributes.background ===
-          this.screen_.textAttributes.DEFAULT_COLOR) {
-            var cursorRow = this.screen_.rowsArray[this.screen_.cursorPosition.row];
-            if (cursorRow.textContent.length <=
-                this.screen_.cursorPosition.column + count) {
-                  this.screen_.deleteChars(count);
-                  this.clearCursorOverflow();
-                  return;
-                }
-          }
-
-      var cursor = this.saveCursor();
-      this.screen_.overwriteString(f.getWhitespace(count));
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
-
-    /**
-     * Erase the current line.
-     *
-     * The cursor position is unchanged.
-     */
-    Terminal.prototype.eraseLine = function() {
-      var cursor = this.saveCursor();
-      this.screen_.clearCursorRow();
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
-
-    /**
-     * Erase all characters from the start of the screen to the current cursor
-     * position, regardless of scroll region.
-     *
-     * The cursor position is unchanged.
-     */
-    Terminal.prototype.eraseAbove = function() {
-      var cursor = this.saveCursor();
-
-      this.eraseToLeft();
-
-      for (var i = 0; i < cursor.row; i++) {
-        this.setAbsoluteCursorPosition(i, 0);
-        this.screen_.clearCursorRow();
+        this.screen_.overwriteString(substr);
       }
 
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
-
-    /**
-     * Erase all characters from the current cursor position to the end of the
-     * screen, regardless of scroll region.
-     *
-     * The cursor position is unchanged.
-     */
-    Terminal.prototype.eraseBelow = function() {
-      var cursor = this.saveCursor();
-
-      this.eraseToRight();
-
-      var bottom = this.screenSize.height - 1;
-      for (var i = cursor.row + 1; i <= bottom; i++) {
-        this.setAbsoluteCursorPosition(i, 0);
-        this.screen_.clearCursorRow();
-      }
-
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
-
-    /**
-     * Fill the terminal with a given character.
-     *
-     * This methods does not respect the VT scroll region.
-     *
-     * @param {string} ch The character to use for the fill.
-     */
-    Terminal.prototype.fill = function(ch) {
-      var cursor = this.saveCursor();
-
-      this.setAbsoluteCursorPosition(0, 0);
-      for (var row = 0; row < this.screenSize.height; row++) {
-        for (var col = 0; col < this.screenSize.width; col++) {
-          this.setAbsoluteCursorPosition(row, col);
-          this.screen_.overwriteString(ch);
-        }
-      }
-
-      this.restoreCursor(cursor);
-    };
-
-    /**
-     * Erase the entire display and leave the cursor at (0, 0).
-     *
-     * This does not respect the scroll region.
-     *
-     * @param {hterm.Screen} opt_screen Optional screen to operate on.  Defaults
-     *     to the current screen.
-     */
-    Terminal.prototype.clearHome = function(opt_screen) {
-      var screen = opt_screen || this.screen_;
-      var bottom = screen.getHeight();
-
-      if (bottom == 0) {
-        // Empty screen, nothing to do.
-        return;
-      }
-
-      for (var i = 0; i < bottom; i++) {
-        screen.setCursorPosition(i, 0);
-        screen.clearCursorRow();
-      }
-
-      screen.setCursorPosition(0, 0);
-    };
-
-    /**
-     * Erase the entire display without changing the cursor position.
-     *
-     * The cursor position is unchanged.  This does not respect the scroll
-     * region.
-     *
-     * @param {hterm.Screen} opt_screen Optional screen to operate on.  Defaults
-     *     to the current screen.
-     */
-    Terminal.prototype.clear = function(opt_screen) {
-      var screen = opt_screen || this.screen_;
-      var cursor = screen.cursorPosition.clone();
-      this.clearHome(screen);
-      screen.setCursorPosition(cursor.row, cursor.column);
-    };
-
-    /**
-     * VT command to insert lines at the current cursor row.
-     *
-     * This respects the current scroll region.  Rows pushed off the bottom are
-     * lost (they won't show up in the scrollback buffer).
-     *
-     * @param {integer} count The number of lines to insert.
-     */
-    Terminal.prototype.insertLines = function(count) {
-      var cursorRow = this.screen_.cursorPosition.row;
-
-      var bottom = this.getVTScrollBottom();
-      count = Math.min(count, bottom - cursorRow);
-
-      // The moveCount is the number of rows we need to relocate to make room for
-      // the new row(s).  The count is the distance to move them.
-      var moveCount = bottom - cursorRow - count + 1;
-      if (moveCount)
-        this.moveRows_(cursorRow, moveCount, cursorRow + count);
-
-      for (var i = count - 1; i >= 0; i--) {
-        this.setAbsoluteCursorPosition(cursorRow + i, 0);
-        this.screen_.clearCursorRow();
-      }
-    };
-
-    /**
-     * VT command to delete lines at the current cursor row.
-     *
-     * New rows are added to the bottom of scroll region to take their place.  New
-     * rows are strictly there to take up space and have no content or style.
-     */
-    Terminal.prototype.deleteLines = function(count) {
-      var cursor = this.saveCursor();
-
-      var top = cursor.row;
-      var bottom = this.getVTScrollBottom();
-
-      var maxCount = bottom - top + 1;
-      count = Math.min(count, maxCount);
-
-      var moveStart = bottom - count + 1;
-      if (count != maxCount)
-        this.moveRows_(top, count, moveStart);
-
-      for (var i = 0; i < count; i++) {
-        this.setAbsoluteCursorPosition(moveStart + i, 0);
-        this.screen_.clearCursorRow();
-      }
-
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
-
-    /**
-     * Inserts the given number of spaces at the current cursor position.
-     *
-     * The cursor position is not changed.
-     */
-    Terminal.prototype.insertSpace = function(count) {
-      var cursor = this.saveCursor();
-
-      var ws = f.getWhitespace(count || 1);
-      this.screen_.insertString(ws);
       this.screen_.maybeClipCurrentRow();
+      startOffset += count;
+    }
 
-      this.restoreCursor(cursor);
-      this.clearCursorOverflow();
-    };
+    this.scheduleSyncCursorPosition_();
+  };
 
-    /**
-     * Forward-delete the specified number of characters starting at the cursor
-     * position.
-     *
-     * @param {integer} count The number of characters to delete.
-     */
-    Terminal.prototype.deleteChars = function(count) {
-      var deleted = this.screen_.deleteChars(count);
-      if (deleted && !this.screen_.textAttributes.isDefault()) {
-        var cursor = this.saveCursor();
-        this.setCursorColumn(this.screenSize.width - deleted);
-        this.screen_.insertString(f.getWhitespace(deleted));
-        this.restoreCursor(cursor);
+  /**
+    * Set the VT scroll region.
+    *
+    * This also resets the cursor position to the absolute (0, 0) position, since
+    * that's what xterm appears to do.
+    *
+    * @param {integer} scrollTop The zero-based top of the scroll region.
+    * @param {integer} scrollBottom The zero-based bottom of the scroll region,
+    *     inclusive.
+    */
+  Terminal.prototype.setVTScrollRegion = function(scrollTop, scrollBottom) {
+    this.vtScrollTop_ = scrollTop;
+    this.vtScrollBottom_ = scrollBottom;
+  };
+
+  /**
+    * Return the top row index according to the VT.
+    *
+    * This will return 0 unless the terminal has been told to restrict scrolling
+    * to some lower row.  It is used for some VT cursor positioning and scrolling
+    * commands.
+    *
+    * @return {integer} The topmost row in the terminal's scroll region.
+    */
+  Terminal.prototype.getVTScrollTop = function() {
+    if (this.vtScrollTop_ != null)
+      return this.vtScrollTop_;
+
+    return 0;
+  };
+
+  /**
+    * Return the bottom row index according to the VT.
+    *
+    * This will return the height of the terminal unless the it has been told to
+    * restrict scrolling to some higher row.  It is used for some VT cursor
+    * positioning and scrolling commands.
+    *
+    * @return {integer} The bottommost row in the terminal's scroll region.
+    */
+  Terminal.prototype.getVTScrollBottom = function() {
+    if (this.vtScrollBottom_ != null)
+      return this.vtScrollBottom_;
+
+    return this.screenSize.height - 1;
+  }
+
+  /**
+    * Process a '\n' character.
+    *
+    * If the cursor is on the final row of the terminal this will append a new
+    * blank row to the screen and scroll the topmost row into the scrollback
+    * buffer.
+    *
+    * Otherwise, this moves the cursor to column zero of the next row.
+    */
+  Terminal.prototype.newLine = function() {
+    if (this.screen_.cursorPosition.row == this.screen_.rowsArray.length - 1) {
+      // If we're at the end of the screen we need to append a new line and
+      // scroll the top line into the scrollback buffer.
+      this.appendRows_(1);
+    } else if (this.screen_.cursorPosition.row == this.getVTScrollBottom()) {
+      // End of the scroll region does not affect the scrollback buffer.
+      this.vtScrollUp(1);
+      this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row, 0);
+    } else {
+      // Anywhere else in the screen just moves the cursor.
+      this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row + 1, 0);
+    }
+  };
+
+  /**
+    * Like newLine(), except maintain the cursor column.
+    */
+  Terminal.prototype.lineFeed = function() {
+    var column = this.screen_.cursorPosition.column;
+    this.newLine();
+    this.setCursorColumn(column);
+  };
+
+  /**
+    * If autoCarriageReturn is set then newLine(), else lineFeed().
+    */
+  Terminal.prototype.formFeed = function() {
+    if (this.options_.autoCarriageReturn) {
+      this.newLine();
+    } else {
+      this.lineFeed();
+    }
+  };
+
+  /**
+    * Move the cursor up one row, possibly inserting a blank line.
+    *
+    * The cursor column is not changed.
+    */
+  Terminal.prototype.reverseLineFeed = function() {
+    var scrollTop = this.getVTScrollTop();
+    var currentRow = this.screen_.cursorPosition.row;
+
+    if (currentRow == scrollTop) {
+      this.insertLines(1);
+    } else {
+      this.setAbsoluteCursorRow(currentRow - 1);
+    }
+  };
+
+  /**
+    * Replace all characters to the left of the current cursor with the space
+    * character.
+    *
+    * TODO(rginda): This should probably *remove* the characters (not just replace
+    * with a space) if there are no characters at or beyond the current cursor
+    * position.
+    */
+  Terminal.prototype.eraseToLeft = function() {
+    var cursor = this.saveCursor();
+    this.setCursorColumn(0);
+    this.screen_.overwriteString(f.getWhitespace(cursor.column + 1));
+    this.restoreCursor(cursor);
+  };
+
+  /**
+    * Erase a given number of characters to the right of the cursor.
+    *
+    * The cursor position is unchanged.
+    *
+    * If the current background color is not the default background color this
+    * will insert spaces rather than delete.  This is unfortunate because the
+    * trailing space will affect text selection, but it's difficult to come up
+    * with a way to style empty space that wouldn't trip up the hterm.Screen
+    * code.
+    */
+  Terminal.prototype.eraseToRight = function(opt_count) {
+    var maxCount = this.screenSize.width - this.screen_.cursorPosition.column;
+    var count = opt_count ? Math.min(opt_count, maxCount) : maxCount;
+
+    if (this.screen_.textAttributes.background ===
+        this.screen_.textAttributes.DEFAULT_COLOR) {
+          var cursorRow = this.screen_.rowsArray[this.screen_.cursorPosition.row];
+          if (cursorRow.textContent.length <=
+              this.screen_.cursorPosition.column + count) {
+                this.screen_.deleteChars(count);
+                this.clearCursorOverflow();
+                return;
+              }
+        }
+
+    var cursor = this.saveCursor();
+    this.screen_.overwriteString(f.getWhitespace(count));
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Erase the current line.
+    *
+    * The cursor position is unchanged.
+    */
+  Terminal.prototype.eraseLine = function() {
+    var cursor = this.saveCursor();
+    this.screen_.clearCursorRow();
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Erase all characters from the start of the screen to the current cursor
+    * position, regardless of scroll region.
+    *
+    * The cursor position is unchanged.
+    */
+  Terminal.prototype.eraseAbove = function() {
+    var cursor = this.saveCursor();
+
+    this.eraseToLeft();
+
+    for (var i = 0; i < cursor.row; i++) {
+      this.setAbsoluteCursorPosition(i, 0);
+      this.screen_.clearCursorRow();
+    }
+
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Erase all characters from the current cursor position to the end of the
+    * screen, regardless of scroll region.
+    *
+    * The cursor position is unchanged.
+    */
+  Terminal.prototype.eraseBelow = function() {
+    var cursor = this.saveCursor();
+
+    this.eraseToRight();
+
+    var bottom = this.screenSize.height - 1;
+    for (var i = cursor.row + 1; i <= bottom; i++) {
+      this.setAbsoluteCursorPosition(i, 0);
+      this.screen_.clearCursorRow();
+    }
+
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Fill the terminal with a given character.
+    *
+    * This methods does not respect the VT scroll region.
+    *
+    * @param {string} ch The character to use for the fill.
+    */
+  Terminal.prototype.fill = function(ch) {
+    var cursor = this.saveCursor();
+
+    this.setAbsoluteCursorPosition(0, 0);
+    for (var row = 0; row < this.screenSize.height; row++) {
+      for (var col = 0; col < this.screenSize.width; col++) {
+        this.setAbsoluteCursorPosition(row, col);
+        this.screen_.overwriteString(ch);
       }
+    }
 
-      this.clearCursorOverflow();
-    };
+    this.restoreCursor(cursor);
+  };
 
-    /**
-     * Shift rows in the scroll region upwards by a given number of lines.
-     *
-     * New rows are inserted at the bottom of the scroll region to fill the
-     * vacated rows.  The new rows not filled out with the current text attributes.
-     *
-     * This function does not affect the scrollback rows at all.  Rows shifted
-     * off the top are lost.
-     *
-     * The cursor position is not altered.
-     *
-     * @param {integer} count The number of rows to scroll.
-     */
-    Terminal.prototype.vtScrollUp = function(count) {
+  /**
+    * Erase the entire display and leave the cursor at (0, 0).
+    *
+    * This does not respect the scroll region.
+    *
+    * @param {hterm.Screen} opt_screen Optional screen to operate on.  Defaults
+    *     to the current screen.
+    */
+  Terminal.prototype.clearHome = function(opt_screen) {
+    var screen = opt_screen || this.screen_;
+    var bottom = screen.getHeight();
+
+    if (bottom == 0) {
+      // Empty screen, nothing to do.
+      return;
+    }
+
+    for (var i = 0; i < bottom; i++) {
+      screen.setCursorPosition(i, 0);
+      screen.clearCursorRow();
+    }
+
+    screen.setCursorPosition(0, 0);
+  };
+
+  /**
+    * Erase the entire display without changing the cursor position.
+    *
+    * The cursor position is unchanged.  This does not respect the scroll
+    * region.
+    *
+    * @param {hterm.Screen} opt_screen Optional screen to operate on.  Defaults
+    *     to the current screen.
+    */
+  Terminal.prototype.clear = function(opt_screen) {
+    var screen = opt_screen || this.screen_;
+    var cursor = screen.cursorPosition.clone();
+    this.clearHome(screen);
+    screen.setCursorPosition(cursor.row, cursor.column);
+  };
+
+  /**
+    * VT command to insert lines at the current cursor row.
+    *
+    * This respects the current scroll region.  Rows pushed off the bottom are
+    * lost (they won't show up in the scrollback buffer).
+    *
+    * @param {integer} count The number of lines to insert.
+    */
+  Terminal.prototype.insertLines = function(count) {
+    var cursorRow = this.screen_.cursorPosition.row;
+
+    var bottom = this.getVTScrollBottom();
+    count = Math.min(count, bottom - cursorRow);
+
+    // The moveCount is the number of rows we need to relocate to make room for
+    // the new row(s).  The count is the distance to move them.
+    var moveCount = bottom - cursorRow - count + 1;
+    if (moveCount)
+      this.moveRows_(cursorRow, moveCount, cursorRow + count);
+
+    for (var i = count - 1; i >= 0; i--) {
+      this.setAbsoluteCursorPosition(cursorRow + i, 0);
+      this.screen_.clearCursorRow();
+    }
+  };
+
+  /**
+    * VT command to delete lines at the current cursor row.
+    *
+    * New rows are added to the bottom of scroll region to take their place.  New
+    * rows are strictly there to take up space and have no content or style.
+    */
+  Terminal.prototype.deleteLines = function(count) {
+    var cursor = this.saveCursor();
+
+    var top = cursor.row;
+    var bottom = this.getVTScrollBottom();
+
+    var maxCount = bottom - top + 1;
+    count = Math.min(count, maxCount);
+
+    var moveStart = bottom - count + 1;
+    if (count != maxCount)
+      this.moveRows_(top, count, moveStart);
+
+    for (var i = 0; i < count; i++) {
+      this.setAbsoluteCursorPosition(moveStart + i, 0);
+      this.screen_.clearCursorRow();
+    }
+
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Inserts the given number of spaces at the current cursor position.
+    *
+    * The cursor position is not changed.
+    */
+  Terminal.prototype.insertSpace = function(count) {
+    var cursor = this.saveCursor();
+
+    var ws = f.getWhitespace(count || 1);
+    this.screen_.insertString(ws);
+    this.screen_.maybeClipCurrentRow();
+
+    this.restoreCursor(cursor);
+    this.clearCursorOverflow();
+  };
+
+  /**
+    * Forward-delete the specified number of characters starting at the cursor
+    * position.
+    *
+    * @param {integer} count The number of characters to delete.
+    */
+  Terminal.prototype.deleteChars = function(count) {
+    var deleted = this.screen_.deleteChars(count);
+    if (deleted && !this.screen_.textAttributes.isDefault()) {
       var cursor = this.saveCursor();
-
-      this.setAbsoluteCursorRow(this.getVTScrollTop());
-      this.deleteLines(count);
-
+      this.setCursorColumn(this.screenSize.width - deleted);
+      this.screen_.insertString(f.getWhitespace(deleted));
       this.restoreCursor(cursor);
-    };
+    }
 
-    /**
-     * Shift rows below the cursor down by a given number of lines.
-     *
-     * This function respects the current scroll region.
-     *
-     * New rows are inserted at the top of the scroll region to fill the
-     * vacated rows.  The new rows not filled out with the current text attributes.
-     *
-     * This function does not affect the scrollback rows at all.  Rows shifted
-     * off the bottom are lost.
-     *
-     * @param {integer} count The number of rows to scroll.
-     */
-    Terminal.prototype.vtScrollDown = function(opt_count) {
-      var cursor = this.saveCursor();
+    this.clearCursorOverflow();
+  };
 
-      this.setAbsoluteCursorPosition(this.getVTScrollTop(), 0);
-      this.insertLines(opt_count);
+  /**
+    * Shift rows in the scroll region upwards by a given number of lines.
+    *
+    * New rows are inserted at the bottom of the scroll region to fill the
+    * vacated rows.  The new rows not filled out with the current text attributes.
+    *
+    * This function does not affect the scrollback rows at all.  Rows shifted
+    * off the top are lost.
+    *
+    * The cursor position is not altered.
+    *
+    * @param {integer} count The number of rows to scroll.
+    */
+  Terminal.prototype.vtScrollUp = function(count) {
+    var cursor = this.saveCursor();
 
-      this.restoreCursor(cursor);
-    };
+    this.setAbsoluteCursorRow(this.getVTScrollTop());
+    this.deleteLines(count);
+
+    this.restoreCursor(cursor);
+  };
+
+  /**
+    * Shift rows below the cursor down by a given number of lines.
+    *
+    * This function respects the current scroll region.
+    *
+    * New rows are inserted at the top of the scroll region to fill the
+    * vacated rows.  The new rows not filled out with the current text attributes.
+    *
+    * This function does not affect the scrollback rows at all.  Rows shifted
+    * off the bottom are lost.
+    *
+    * @param {integer} count The number of rows to scroll.
+    */
+  Terminal.prototype.vtScrollDown = function(opt_count) {
+    var cursor = this.saveCursor();
+
+    this.setAbsoluteCursorPosition(this.getVTScrollTop(), 0);
+    this.insertLines(opt_count);
+
+    this.restoreCursor(cursor);
+  };
 
 
-    /**
-     * Set the cursor position.
-     *
-     * The cursor row is relative to the scroll region if the terminal has
-     * 'origin mode' enabled, or relative to the addressable screen otherwise.
-     *
-     * @param {integer} row The new zero-based cursor row.
-     * @param {integer} row The new zero-based cursor column.
-     */
-    Terminal.prototype.setCursorPosition = function(row, column) {
-      if (this.options_.originMode) {
-        this.setRelativeCursorPosition(row, column);
-      } else {
-        this.setAbsoluteCursorPosition(row, column);
-      }
-    };
+  /**
+    * Set the cursor position.
+    *
+    * The cursor row is relative to the scroll region if the terminal has
+    * 'origin mode' enabled, or relative to the addressable screen otherwise.
+    *
+    * @param {integer} row The new zero-based cursor row.
+    * @param {integer} row The new zero-based cursor column.
+    */
+  Terminal.prototype.setCursorPosition = function(row, column) {
+    if (this.options_.originMode) {
+      this.setRelativeCursorPosition(row, column);
+    } else {
+      this.setAbsoluteCursorPosition(row, column);
+    }
+  };
 
-    Terminal.prototype.setRelativeCursorPosition = function(row, column) {
-      var scrollTop = this.getVTScrollTop();
-      row = f.clamp(row + scrollTop, scrollTop, this.getVTScrollBottom());
-      column = f.clamp(column, 0, this.screenSize.width - 1);
-      this.screen_.setCursorPosition(row, column);
-    };
+  Terminal.prototype.setRelativeCursorPosition = function(row, column) {
+    var scrollTop = this.getVTScrollTop();
+    row = f.clamp(row + scrollTop, scrollTop, this.getVTScrollBottom());
+    column = f.clamp(column, 0, this.screenSize.width - 1);
+    this.screen_.setCursorPosition(row, column);
+  };
 
-    Terminal.prototype.setAbsoluteCursorPosition = function(row, column) {
-      row = f.clamp(row, 0, this.screenSize.height - 1);
-      column = f.clamp(column, 0, this.screenSize.width - 1);
-      this.screen_.setCursorPosition(row, column);
-    };
+  Terminal.prototype.setAbsoluteCursorPosition = function(row, column) {
+    row = f.clamp(row, 0, this.screenSize.height - 1);
+    column = f.clamp(column, 0, this.screenSize.width - 1);
+    this.screen_.setCursorPosition(row, column);
+  };
 
-    /**
-     * Set the cursor column.
-     *
-     * @param {integer} column The new zero-based cursor column.
-     */
-    Terminal.prototype.setCursorColumn = function(column) {
-      this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row, column);
-    };
+  /**
+    * Set the cursor column.
+    *
+    * @param {integer} column The new zero-based cursor column.
+    */
+  Terminal.prototype.setCursorColumn = function(column) {
+    this.setAbsoluteCursorPosition(this.screen_.cursorPosition.row, column);
+  };
 
-    /**
-     * Return the cursor column.
-     *
-     * @return {integer} The zero-based cursor column.
-     */
-    Terminal.prototype.getCursorColumn = function() {
-      return this.screen_.cursorPosition.column;
-    };
+  /**
+    * Return the cursor column.
+    *
+    * @return {integer} The zero-based cursor column.
+    */
+  Terminal.prototype.getCursorColumn = function() {
+    return this.screen_.cursorPosition.column;
+  };
 
-    /**
-     * Set the cursor row.
-     *
-     * The cursor row is relative to the scroll region if the terminal has
-     * 'origin mode' enabled, or relative to the addressable screen otherwise.
-     *
-     * @param {integer} row The new cursor row.
-     */
-    Terminal.prototype.setAbsoluteCursorRow = function(row) {
-      this.setAbsoluteCursorPosition(row, this.screen_.cursorPosition.column);
-    };
+  /**
+    * Set the cursor row.
+    *
+    * The cursor row is relative to the scroll region if the terminal has
+    * 'origin mode' enabled, or relative to the addressable screen otherwise.
+    *
+    * @param {integer} row The new cursor row.
+    */
+  Terminal.prototype.setAbsoluteCursorRow = function(row) {
+    this.setAbsoluteCursorPosition(row, this.screen_.cursorPosition.column);
+  };
 
-    /**
-     * Return the cursor row.
-     *
-     * @return {integer} The zero-based cursor row.
-     */
-    Terminal.prototype.getCursorRow = function(row) {
-      return this.screen_.cursorPosition.row;
-    };
+  /**
+    * Return the cursor row.
+    *
+    * @return {integer} The zero-based cursor row.
+    */
+  Terminal.prototype.getCursorRow = function(row) {
+    return this.screen_.cursorPosition.row;
+  };
 
-    /**
-     * Request that the ScrollPort redraw itself soon.
-     *
-     * The redraw will happen asynchronously, soon after the call stack winds down.
-     * Multiple calls will be coalesced into a single redraw.
-     */
-    Terminal.prototype.scheduleRedraw_ = function() {
-      if (this.timeouts_.redraw)
-        return;
+  /**
+    * Request that the ScrollPort redraw itself soon.
+    *
+    * The redraw will happen asynchronously, soon after the call stack winds down.
+    * Multiple calls will be coalesced into a single redraw.
+    */
+  Terminal.prototype.scheduleRedraw_ = function() {
+    if (this.timeouts_.redraw)
+      return;
 
-      var self = this;
-      this.timeouts_.redraw = setTimeout(function() {
-        delete self.timeouts_.redraw;
-        self.scrollPort_.redraw_();
-      }, 0);
-    };
+    var self = this;
+    this.timeouts_.redraw = setTimeout(function() {
+      delete self.timeouts_.redraw;
+      self.scrollPort_.redraw_();
+    }, 0);
+  };
 
-    /**
-     * Request that the ScrollPort be scrolled to the bottom.
-     *
-     * The scroll will happen asynchronously, soon after the call stack winds down.
-     * Multiple calls will be coalesced into a single scroll.
-     *
-     * This affects the scrollbar position of the ScrollPort, and has nothing to
-     * do with the VT scroll commands.
-     */
-    Terminal.prototype.scheduleScrollDown_ = function() {
-      if (this.timeouts_.scrollDown)
-        return;
+  /**
+    * Request that the ScrollPort be scrolled to the bottom.
+    *
+    * The scroll will happen asynchronously, soon after the call stack winds down.
+    * Multiple calls will be coalesced into a single scroll.
+    *
+    * This affects the scrollbar position of the ScrollPort, and has nothing to
+    * do with the VT scroll commands.
+    */
+  Terminal.prototype.scheduleScrollDown_ = function() {
+    if (this.timeouts_.scrollDown)
+      return;
 
-      var self = this;
-      this.timeouts_.scrollDown = setTimeout(function() {
-        delete self.timeouts_.scrollDown;
-        self.scrollPort_.scrollRowToBottom(self.getRowCount());
-      }, 10);
-    };
+    var self = this;
+    this.timeouts_.scrollDown = setTimeout(function() {
+      delete self.timeouts_.scrollDown;
+      self.scrollPort_.scrollRowToBottom(self.getRowCount());
+    }, 10);
+  };
 
-    /**
-     * Move the cursor up a specified number of rows.
-     *
-     * @param {integer} count The number of rows to move the cursor.
-     */
-    Terminal.prototype.cursorUp = function(count) {
-      return this.cursorDown(-(count || 1));
-    };
+  /**
+    * Move the cursor up a specified number of rows.
+    *
+    * @param {integer} count The number of rows to move the cursor.
+    */
+  Terminal.prototype.cursorUp = function(count) {
+    return this.cursorDown(-(count || 1));
+  };
 
-    /**
-     * Move the cursor down a specified number of rows.
-     *
-     * @param {integer} count The number of rows to move the cursor.
-     */
-    Terminal.prototype.cursorDown = function(count) {
-      count = count || 1;
-      var minHeight = (this.options_.originMode ? this.getVTScrollTop() : 0);
-      var maxHeight = (this.options_.originMode ? this.getVTScrollBottom() :
-          this.screenSize.height - 1);
+  /**
+    * Move the cursor down a specified number of rows.
+    *
+    * @param {integer} count The number of rows to move the cursor.
+    */
+  Terminal.prototype.cursorDown = function(count) {
+    count = count || 1;
+    var minHeight = (this.options_.originMode ? this.getVTScrollTop() : 0);
+    var maxHeight = (this.options_.originMode ? this.getVTScrollBottom() :
+        this.screenSize.height - 1);
 
-      var row = f.clamp(this.screen_.cursorPosition.row + count,
-          minHeight, maxHeight);
-      this.setAbsoluteCursorRow(row);
-    };
+    var row = f.clamp(this.screen_.cursorPosition.row + count,
+        minHeight, maxHeight);
+    this.setAbsoluteCursorRow(row);
+  };
 
-    /**
-     * Move the cursor left a specified number of columns.
-     *
-     * @param {integer} count The number of columns to move the cursor.
-     */
-    Terminal.prototype.cursorLeft = function(count) {
-      return this.cursorRight(-(count || 1));
-    };
+  /**
+    * Move the cursor left a specified number of columns.
+    *
+    * @param {integer} count The number of columns to move the cursor.
+    */
+  Terminal.prototype.cursorLeft = function(count) {
+    return this.cursorRight(-(count || 1));
+  };
 
-    /**
-     * Move the cursor right a specified number of columns.
-     *
-     * @param {integer} count The number of columns to move the cursor.
-     */
-    Terminal.prototype.cursorRight = function(count) {
-      count = count || 1;
-      var column = f.clamp(this.screen_.cursorPosition.column + count,
-          0, this.screenSize.width - 1);
-      this.setCursorColumn(column);
-    };
+  /**
+    * Move the cursor right a specified number of columns.
+    *
+    * @param {integer} count The number of columns to move the cursor.
+    */
+  Terminal.prototype.cursorRight = function(count) {
+    count = count || 1;
+    var column = f.clamp(this.screen_.cursorPosition.column + count,
+        0, this.screenSize.width - 1);
+    this.setCursorColumn(column);
+  };
 
-    /**
-     * Reverse the foreground and background colors of the terminal.
-     *
-     * This only affects text that was drawn with no attributes.
-     *
-     * TODO(rginda): Test xterm to see if reverse is respected for text that has
-     * been drawn with attributes that happen to coincide with the default
-     * 'no-attribute' colors.  My guess is probably not.
-     */
-    Terminal.prototype.setReverseVideo = function(state) {
-      this.options_.reverseVideo = state;
-      if (state) {
-        this.scrollPort_.setForegroundColor(this.prefs_['background-color']);
-        this.scrollPort_.setBackgroundColor(this.prefs_['foreground-color']);
-      } else {
-        this.scrollPort_.setForegroundColor(this.prefs_['foreground-color']);
-        this.scrollPort_.setBackgroundColor(this.prefs_['background-color']);
-      }
-    };
+  /**
+    * Reverse the foreground and background colors of the terminal.
+    *
+    * This only affects text that was drawn with no attributes.
+    *
+    * TODO(rginda): Test xterm to see if reverse is respected for text that has
+    * been drawn with attributes that happen to coincide with the default
+    * 'no-attribute' colors.  My guess is probably not.
+    */
+  Terminal.prototype.setReverseVideo = function(state) {
+    this.options_.reverseVideo = state;
+    if (state) {
+      this.scrollPort_.setForegroundColor(this.prefs_['background-color']);
+      this.scrollPort_.setBackgroundColor(this.prefs_['foreground-color']);
+    } else {
+      this.scrollPort_.setForegroundColor(this.prefs_['foreground-color']);
+      this.scrollPort_.setBackgroundColor(this.prefs_['background-color']);
+    }
+  };
 
-    /**
-     * Ring the terminal bell.
-     */
-    Terminal.prototype.ringBell = function() {
-      this.cursorNode_.style.backgroundColor =
-        this.scrollPort_.getForegroundColor();
+  /**
+    * Ring the terminal bell.
+    */
+  Terminal.prototype.ringBell = function() {
+    this.cursorNode_.style.backgroundColor =
+      this.scrollPort_.getForegroundColor();
 
-      var self = this;
-      setTimeout(function() {
-        self.cursorNode_.style.backgroundColor = self.prefs_['cursor-color'];
-      }, 200);
-    };
+    var self = this;
+    setTimeout(function() {
+      self.cursorNode_.style.backgroundColor = self.prefs_['cursor-color'];
+    }, 200);
+  };
 
-    /**
-     * Set the origin mode bit.
-     *
-     * If origin mode is on, certain VT cursor and scrolling commands measure their
-     * row parameter relative to the VT scroll region.  Otherwise, row 0 corresponds
-     * to the top of the addressable screen.
-     *
-     * Defaults to off.
-     *
-     * @param {boolean} state True to set origin mode, false to unset.
-     */
-    Terminal.prototype.setOriginMode = function(state) {
-      this.options_.originMode = state;
-      this.setCursorPosition(0, 0);
-    };
+  /**
+    * Set the origin mode bit.
+    *
+    * If origin mode is on, certain VT cursor and scrolling commands measure their
+    * row parameter relative to the VT scroll region.  Otherwise, row 0 corresponds
+    * to the top of the addressable screen.
+    *
+    * Defaults to off.
+    *
+    * @param {boolean} state True to set origin mode, false to unset.
+    */
+  Terminal.prototype.setOriginMode = function(state) {
+    this.options_.originMode = state;
+    this.setCursorPosition(0, 0);
+  };
 
-    /**
-     * Set the insert mode bit.
-     *
-     * If insert mode is on, existing text beyond the cursor position will be
-     * shifted right to make room for new text.  Otherwise, new text overwrites
-     * any existing text.
-     *
-     * Defaults to off.
-     *
-     * @param {boolean} state True to set insert mode, false to unset.
-     */
-    Terminal.prototype.setInsertMode = function(state) {
-      this.options_.insertMode = state;
-    };
+  /**
+    * Set the insert mode bit.
+    *
+    * If insert mode is on, existing text beyond the cursor position will be
+    * shifted right to make room for new text.  Otherwise, new text overwrites
+    * any existing text.
+    *
+    * Defaults to off.
+    *
+    * @param {boolean} state True to set insert mode, false to unset.
+    */
+  Terminal.prototype.setInsertMode = function(state) {
+    this.options_.insertMode = state;
+  };
 
-    /**
-     * Set the auto carriage return bit.
-     *
-     * If auto carriage return is on then a formfeed character is interpreted
-     * as a newline, otherwise it's the same as a linefeed.  The difference boils
-     * down to whether or not the cursor column is reset.
-     */
-    Terminal.prototype.setAutoCarriageReturn = function(state) {
-      this.options_.autoCarriageReturn = state;
-    };
+  /**
+    * Set the auto carriage return bit.
+    *
+    * If auto carriage return is on then a formfeed character is interpreted
+    * as a newline, otherwise it's the same as a linefeed.  The difference boils
+    * down to whether or not the cursor column is reset.
+    */
+  Terminal.prototype.setAutoCarriageReturn = function(state) {
+    this.options_.autoCarriageReturn = state;
+  };
 
-    /**
-     * Set the wraparound mode bit.
-     *
-     * If wraparound mode is on, certain VT commands will allow the cursor to wrap
-     * to the start of the following row.  Otherwise, the cursor is clamped to the
-     * end of the screen and attempts to write past it are ignored.
-     *
-     * Defaults to on.
-     *
-     * @param {boolean} state True to set wraparound mode, false to unset.
-     */
-    Terminal.prototype.setWraparound = function(state) {
-      this.options_.wraparound = state;
-    };
+  /**
+    * Set the wraparound mode bit.
+    *
+    * If wraparound mode is on, certain VT commands will allow the cursor to wrap
+    * to the start of the following row.  Otherwise, the cursor is clamped to the
+    * end of the screen and attempts to write past it are ignored.
+    *
+    * Defaults to on.
+    *
+    * @param {boolean} state True to set wraparound mode, false to unset.
+    */
+  Terminal.prototype.setWraparound = function(state) {
+    this.options_.wraparound = state;
+  };
 
-    /**
-     * Set the reverse-wraparound mode bit.
-     *
-     * If wraparound mode is off, certain VT commands will allow the cursor to wrap
-     * to the end of the previous row.  Otherwise, the cursor is clamped to column
-     * 0.
-     *
-     * Defaults to off.
-     *
-     * @param {boolean} state True to set reverse-wraparound mode, false to unset.
-     */
-    Terminal.prototype.setReverseWraparound = function(state) {
-      this.options_.reverseWraparound = state;
-    };
+  /**
+    * Set the reverse-wraparound mode bit.
+    *
+    * If wraparound mode is off, certain VT commands will allow the cursor to wrap
+    * to the end of the previous row.  Otherwise, the cursor is clamped to column
+    * 0.
+    *
+    * Defaults to off.
+    *
+    * @param {boolean} state True to set reverse-wraparound mode, false to unset.
+    */
+  Terminal.prototype.setReverseWraparound = function(state) {
+    this.options_.reverseWraparound = state;
+  };
 
-    /**
-     * Selects between the primary and alternate screens.
-     *
-     * If alternate mode is on, the alternate screen is active.  Otherwise the
-     * primary screen is active.
-     *
-     * Swapping screens has no effect on the scrollback buffer.
-     *
-     * Each screen maintains its own cursor position.
-     *
-     * Defaults to off.
-     *
-     * @param {boolean} state True to set alternate mode, false to unset.
-     */
-    Terminal.prototype.setAlternateMode = function(state) {
-      var cursor = this.saveCursor();
-      this.screen_ = state ? this.alternateScreen_ : this.primaryScreen_;
+  /**
+    * Selects between the primary and alternate screens.
+    *
+    * If alternate mode is on, the alternate screen is active.  Otherwise the
+    * primary screen is active.
+    *
+    * Swapping screens has no effect on the scrollback buffer.
+    *
+    * Each screen maintains its own cursor position.
+    *
+    * Defaults to off.
+    *
+    * @param {boolean} state True to set alternate mode, false to unset.
+    */
+  Terminal.prototype.setAlternateMode = function(state) {
+    var cursor = this.saveCursor();
+    this.screen_ = state ? this.alternateScreen_ : this.primaryScreen_;
 
-      if (this.screen_.rowsArray.length &&
-          this.screen_.rowsArray[0].rowIndex != this.scrollbackRows_.length) {
-            // If the screen changed sizes while we were away, our rowIndexes may
-            // be incorrect.
-            var offset = this.scrollbackRows_.length;
-            var ary = this.screen_.rowsArray;
-            for (var i = 0; i < ary.length; i++) {
-              ary[i].rowIndex = offset + i;
-            }
+    if (this.screen_.rowsArray.length &&
+        this.screen_.rowsArray[0].rowIndex != this.scrollbackRows_.length) {
+          // If the screen changed sizes while we were away, our rowIndexes may
+          // be incorrect.
+          var offset = this.scrollbackRows_.length;
+          var ary = this.screen_.rowsArray;
+          for (var i = 0; i < ary.length; i++) {
+            ary[i].rowIndex = offset + i;
           }
+        }
 
-      this.realizeWidth_(this.screenSize.width);
-      this.realizeHeight_(this.screenSize.height);
-      this.scrollPort_.syncScrollHeight();
-      this.scrollPort_.invalidate();
+    this.realizeWidth_(this.screenSize.width);
+    this.realizeHeight_(this.screenSize.height);
+    this.scrollPort_.syncScrollHeight();
+    this.scrollPort_.invalidate();
 
-      this.restoreCursor(cursor);
-      this.scrollPort_.resize();
-    };
+    this.restoreCursor(cursor);
+    this.scrollPort_.resize();
+  };
 
-    /**
-     * Turn-off cursor blank
-     */
-    Terminal.prototype.setCursorBlink = function() {
-      if (this.options_.cursorVisible)
-        this.setCursorVisible(true);
-    };
+  /**
+    * Turn-off cursor blank
+    */
+  Terminal.prototype.setCursorBlink = function() {
+    if (this.options_.cursorVisible)
+      this.setCursorVisible(true);
+  };
 
-    /**
-     * Set the cursor-visible mode bit.
-     *
-     * If cursor-visible is on, the cursor will be visible.  Otherwise it will not.
-     *
-     * Defaults to on.
-     *
-     * @param {boolean} state True to set cursor-visible mode, false to unset.
-     */
-    Terminal.prototype.setCursorVisible = function(state) {
-      this.options_.cursorVisible = state;
+  /**
+    * Set the cursor-visible mode bit.
+    *
+    * If cursor-visible is on, the cursor will be visible.  Otherwise it will not.
+    *
+    * Defaults to on.
+    *
+    * @param {boolean} state True to set cursor-visible mode, false to unset.
+    */
+  Terminal.prototype.setCursorVisible = function(state) {
+    this.options_.cursorVisible = state;
 
-      if (!state) {
-        this.cursorNode_.style.opacity = '0';
+    if (!state) {
+      this.cursorNode_.style.opacity = '0';
+      return;
+    }
+
+    this.syncCursorPosition_();
+
+    this.cursorNode_.style.opacity = '1';
+  };
+
+  /**
+    * Synchronizes the visible cursor and document selection with the current
+    * cursor coordinates.
+    */
+  Terminal.prototype.syncCursorPosition_ = function() {
+    var topRowIndex = this.scrollPort_.getTopRowIndex();
+    var bottomRowIndex = this.scrollPort_.getBottomRowIndex(topRowIndex);
+    var cursorRowIndex = this.scrollbackRows_.length +
+      this.screen_.cursorPosition.row;
+
+    if (cursorRowIndex > bottomRowIndex) {
+      // Cursor is scrolled off screen, move it outside of the visible area.
+      this.cursorNode_.style.top = -this.scrollPort_.characterSize.height + 'px';
+      return;
+    }
+
+    this.cursorNode_.style.width = this.scrollPort_.characterSize.width + 'px';
+    this.cursorNode_.style.height = this.scrollPort_.characterSize.height + 'px';
+
+    this.cursorNode_.style.top = this.scrollPort_.visibleRowTopMargin +
+      this.scrollPort_.characterSize.height * (cursorRowIndex - topRowIndex) +
+      'px';
+    this.cursorNode_.style.left = this.scrollPort_.characterSize.width *
+      this.screen_.cursorPosition.column + 'px';
+
+    this.cursorNode_.setAttribute('title',
+        '(' + this.screen_.cursorPosition.row +
+        ', ' + this.screen_.cursorPosition.column +
+        ')');
+
+    // Update the caret for a11y purposes.
+    var selection = this.document_.getSelection();
+    if (selection && selection.isCollapsed)
+      this.screen_.syncSelectionCaret(selection);
+  };
+
+  /**
+    * Synchronizes the visible cursor with the current cursor coordinates.
+    *
+    * The sync will happen asynchronously, soon after the call stack winds down.
+    * Multiple calls will be coalesced into a single sync.
+    */
+  Terminal.prototype.scheduleSyncCursorPosition_ = function() {
+    if (this.timeouts_.syncCursor)
+      return;
+
+    var self = this;
+    this.timeouts_.syncCursor = setTimeout(function() {
+      self.syncCursorPosition_();
+      delete self.timeouts_.syncCursor;
+    }, 0);
+  };
+
+  /**
+    * Show or hide the zoom warning.
+    *
+    * The zoom warning is a message warning the user that their browser zoom must
+    * be set to 100% in order for hterm to function properly.
+    *
+    * @param {boolean} state True to show the message, false to hide it.
+    */
+  Terminal.prototype.showZoomWarning_ = function(state) {
+    if (!this.zoomWarningNode_) {
+      if (!state)
         return;
-      }
 
-      this.syncCursorPosition_();
-
-      this.cursorNode_.style.opacity = '1';
-    };
-
-    /**
-     * Synchronizes the visible cursor and document selection with the current
-     * cursor coordinates.
-     */
-    Terminal.prototype.syncCursorPosition_ = function() {
-      var topRowIndex = this.scrollPort_.getTopRowIndex();
-      var bottomRowIndex = this.scrollPort_.getBottomRowIndex(topRowIndex);
-      var cursorRowIndex = this.scrollbackRows_.length +
-        this.screen_.cursorPosition.row;
-
-      if (cursorRowIndex > bottomRowIndex) {
-        // Cursor is scrolled off screen, move it outside of the visible area.
-        this.cursorNode_.style.top = -this.scrollPort_.characterSize.height + 'px';
-        return;
-      }
-
-      this.cursorNode_.style.width = this.scrollPort_.characterSize.width + 'px';
-      this.cursorNode_.style.height = this.scrollPort_.characterSize.height + 'px';
-
-      this.cursorNode_.style.top = this.scrollPort_.visibleRowTopMargin +
-        this.scrollPort_.characterSize.height * (cursorRowIndex - topRowIndex) +
-        'px';
-      this.cursorNode_.style.left = this.scrollPort_.characterSize.width *
-        this.screen_.cursorPosition.column + 'px';
-
-      this.cursorNode_.setAttribute('title',
-          '(' + this.screen_.cursorPosition.row +
-          ', ' + this.screen_.cursorPosition.column +
-          ')');
-
-      // Update the caret for a11y purposes.
-      var selection = this.document_.getSelection();
-      if (selection && selection.isCollapsed)
-        this.screen_.syncSelectionCaret(selection);
-    };
-
-    /**
-     * Synchronizes the visible cursor with the current cursor coordinates.
-     *
-     * The sync will happen asynchronously, soon after the call stack winds down.
-     * Multiple calls will be coalesced into a single sync.
-     */
-    Terminal.prototype.scheduleSyncCursorPosition_ = function() {
-      if (this.timeouts_.syncCursor)
-        return;
-
-      var self = this;
-      this.timeouts_.syncCursor = setTimeout(function() {
-        self.syncCursorPosition_();
-        delete self.timeouts_.syncCursor;
-      }, 0);
-    };
-
-    /**
-     * Show or hide the zoom warning.
-     *
-     * The zoom warning is a message warning the user that their browser zoom must
-     * be set to 100% in order for hterm to function properly.
-     *
-     * @param {boolean} state True to show the message, false to hide it.
-     */
-    Terminal.prototype.showZoomWarning_ = function(state) {
-      if (!this.zoomWarningNode_) {
-        if (!state)
-          return;
-
-        this.zoomWarningNode_ = this.document_.createElement('div');
-        this.zoomWarningNode_.style.cssText = (
-            'color: black;' +
-            'background-color: #ff2222;' +
-            'font-size: large;' +
-            'border-radius: 8px;' +
-            'opacity: 0.75;' +
-            'padding: 0.2em 0.5em 0.2em 0.5em;' +
-            'top: 0.5em;' +
-            'right: 1.2em;' +
-            'position: absolute;' +
-            '-webkit-text-size-adjust: none;' +
-            '-webkit-user-select: none;');
-      }
-
-      this.zoomWarningNode_.textContent = 'ZOOM_WARNING' ||
-        ('!! ' + parseInt(this.scrollPort_.characterSize.zoomFactor * 100) +
-         '% !!');
-      this.zoomWarningNode_.style.fontFamily = this.prefs_['font-family'];
-
-      if (state) {
-        if (!this.zoomWarningNode_.parentNode)
-          this.div_.parentNode.appendChild(this.zoomWarningNode_);
-      } else if (this.zoomWarningNode_.parentNode) {
-        this.zoomWarningNode_.parentNode.removeChild(this.zoomWarningNode_);
-      }
-    };
-
-    /**
-     * Copy a string to the system clipboard.
-     *
-     * Note: If there is a selected range in the terminal, it'll be cleared.
-     */
-    Terminal.prototype.copyStringToClipboard = function(str) {
-      var copySource = this.document_.createElement('textarea');
-      copySource.textContent = str;
-      copySource.style.cssText = (
-          '-webkit-user-select: text;' +
+      this.zoomWarningNode_ = this.document_.createElement('div');
+      this.zoomWarningNode_.style.cssText = (
+          'color: black;' +
+          'background-color: #ff2222;' +
+          'font-size: large;' +
+          'border-radius: 8px;' +
+          'opacity: 0.75;' +
+          'padding: 0.2em 0.5em 0.2em 0.5em;' +
+          'top: 0.5em;' +
+          'right: 1.2em;' +
           'position: absolute;' +
-          'top: -99px');
+          '-webkit-text-size-adjust: none;' +
+          '-webkit-user-select: none;');
+    }
 
-      this.document_.body.appendChild(copySource);
+    this.zoomWarningNode_.textContent = 'ZOOM_WARNING' ||
+      ('!! ' + parseInt(this.scrollPort_.characterSize.zoomFactor * 100) +
+        '% !!');
+    this.zoomWarningNode_.style.fontFamily = this.prefs_['font-family'];
 
-      var selection = this.document_.getSelection();
-      var anchorNode = selection.anchorNode;
-      var anchorOffset = selection.anchorOffset;
-      var focusNode = selection.focusNode;
-      var focusOffset = selection.focusOffset;
+    if (state) {
+      if (!this.zoomWarningNode_.parentNode)
+        this.div_.parentNode.appendChild(this.zoomWarningNode_);
+    } else if (this.zoomWarningNode_.parentNode) {
+      this.zoomWarningNode_.parentNode.removeChild(this.zoomWarningNode_);
+    }
+  };
 
-      selection.selectAllChildren(copySource);
+  /**
+    * Copy a string to the system clipboard.
+    *
+    * Note: If there is a selected range in the terminal, it'll be cleared.
+    */
+  Terminal.prototype.copyStringToClipboard = function(str) {
+    var copySource = this.document_.createElement('textarea');
+    copySource.textContent = str;
+    copySource.style.cssText = (
+        '-webkit-user-select: text;' +
+        'position: absolute;' +
+        'top: -99px');
 
-      copySource.focus()
+    this.document_.body.appendChild(copySource);
 
-      selection.collapse(anchorNode, anchorOffset);
-      selection.extend(focusNode, focusOffset);
+    var selection = this.document_.getSelection();
+    var anchorNode = selection.anchorNode;
+    var anchorOffset = selection.anchorOffset;
+    var focusNode = selection.focusNode;
+    var focusOffset = selection.focusOffset;
 
-      copySource.parentNode.removeChild(copySource);
-    };
+    selection.selectAllChildren(copySource);
 
-    Terminal.prototype.getSelectionText = function() {
-      var selection = this.scrollPort_.selection;
-      selection.sync();
+    copySource.focus()
 
-      if (selection.isCollapsed)
-        return null;
+    selection.collapse(anchorNode, anchorOffset);
+    selection.extend(focusNode, focusOffset);
+
+    copySource.parentNode.removeChild(copySource);
+  };
+
+  Terminal.prototype.getSelectionText = function() {
+    var selection = this.scrollPort_.selection;
+    selection.sync();
+
+    if (selection.isCollapsed)
+      return null;
 
 
-      // Start offset measures from the beginning of the line.
-      var startOffset = selection.startOffset;
-      var node = selection.startNode;
+    // Start offset measures from the beginning of the line.
+    var startOffset = selection.startOffset;
+    var node = selection.startNode;
 
-      if (node.nodeName != 'X-ROW') {
-        // If the selection doesn't start on an x-row node, then it must be
-        // somewhere inside the x-row.  Add any characters from previous siblings
-        // into the start offset.
+    if (node.nodeName != 'X-ROW') {
+      // If the selection doesn't start on an x-row node, then it must be
+      // somewhere inside the x-row.  Add any characters from previous siblings
+      // into the start offset.
 
-        if (node.nodeName == '#text' && node.parentNode.nodeName == 'SPAN') {
-          // If node is the text node in a styled span, move up to the span node.
-          node = node.parentNode;
-        }
-
-        while (node.previousSibling) {
-          node = node.previousSibling;
-          startOffset += node.textContent.length;
-        }
+      if (node.nodeName == '#text' && node.parentNode.nodeName == 'SPAN') {
+        // If node is the text node in a styled span, move up to the span node.
+        node = node.parentNode;
       }
 
-      // End offset measures from the end of the line.
-      var endOffset = selection.endNode.textContent.length - selection.endOffset;
-      var node = selection.endNode;
+      while (node.previousSibling) {
+        node = node.previousSibling;
+        startOffset += node.textContent.length;
+      }
+    }
 
-      if (node.nodeName != 'X-ROW') {
-        // If the selection doesn't end on an x-row node, then it must be
-        // somewhere inside the x-row.  Add any characters from following siblings
-        // into the end offset.
+    // End offset measures from the end of the line.
+    var endOffset = selection.endNode.textContent.length - selection.endOffset;
+    var node = selection.endNode;
 
-        if (node.nodeName == '#text' && node.parentNode.nodeName == 'SPAN') {
-          // If node is the text node in a styled span, move up to the span node.
-          node = node.parentNode;
-        }
+    if (node.nodeName != 'X-ROW') {
+      // If the selection doesn't end on an x-row node, then it must be
+      // somewhere inside the x-row.  Add any characters from following siblings
+      // into the end offset.
 
-        while (node.nextSibling) {
-          node = node.nextSibling;
-          endOffset += node.textContent.length;
-        }
+      if (node.nodeName == '#text' && node.parentNode.nodeName == 'SPAN') {
+        // If node is the text node in a styled span, move up to the span node.
+        node = node.parentNode;
       }
 
-      var rv = this.getRowsText(selection.startRow.rowIndex,
-          selection.endRow.rowIndex + 1);
-      return rv.substring(startOffset, rv.length - endOffset);
-    };
+      while (node.nextSibling) {
+        node = node.nextSibling;
+        endOffset += node.textContent.length;
+      }
+    }
 
-    /**
-     * Copy the current selection to the system clipboard, then clear it after a
-     * short delay.
-     */
-    Terminal.prototype.copySelectionToClipboard = function() {
-      var text = this.getSelectionText();
-      if (text != null)
-        this.copyStringToClipboard(text);
-    };
+    var rv = this.getRowsText(selection.startRow.rowIndex,
+        selection.endRow.rowIndex + 1);
+    return rv.substring(startOffset, rv.length - endOffset);
+  };
 
-    /**
-     * Invoked by hterm.Terminal.Keyboard when a VT keystroke is detected.
-     *
-     * @param {string} string The VT string representing the keystroke.
-     */
-    Terminal.prototype.onVTKeystroke = function(string) {
-      this.scrollPort_.scrollRowToBottom(this.getRowCount());
-      this.io.onVTKeystroke(string);
-    };
+  /**
+    * Copy the current selection to the system clipboard, then clear it after a
+    * short delay.
+    */
+  Terminal.prototype.copySelectionToClipboard = function() {
+    var text = this.getSelectionText();
+    if (text != null)
+      this.copyStringToClipboard(text);
+  };
 
-    /**
-     * Add the terminalRow and terminalColumn properties to mouse events and
-     * then forward on to onMouse().
-     *
-     * The terminalRow and terminalColumn properties contain the (row, column)
-     * coordinates for the mouse event.
-     */
-    Terminal.prototype.onMouse_ = function(e) {
-      if (e.processedByTerminalHandler_) {
-        // We register our event handlers on the document, as well as the cursor
-        // and the scroll blocker.  Mouse events that occur on the cursor or
-        // scroll blocker will also appear on the document, but we don't want to
-        // process them twice.
-        //
-        // We can't just prevent bubbling because that has other side effects, so
-        // we decorate the event object with this property instead.
+  /**
+    * Invoked by hterm.Terminal.Keyboard when a VT keystroke is detected.
+    *
+    * @param {string} string The VT string representing the keystroke.
+    */
+  Terminal.prototype.onVTKeystroke = function(string) {
+    this.scrollPort_.scrollRowToBottom(this.getRowCount());
+    this.io.onVTKeystroke(string);
+  };
+
+  /**
+    * Add the terminalRow and terminalColumn properties to mouse events and
+    * then forward on to onMouse().
+    *
+    * The terminalRow and terminalColumn properties contain the (row, column)
+    * coordinates for the mouse event.
+    */
+  Terminal.prototype.onMouse_ = function(e) {
+    if (e.processedByTerminalHandler_) {
+      // We register our event handlers on the document, as well as the cursor
+      // and the scroll blocker.  Mouse events that occur on the cursor or
+      // scroll blocker will also appear on the document, but we don't want to
+      // process them twice.
+      //
+      // We can't just prevent bubbling because that has other side effects, so
+      // we decorate the event object with this property instead.
+      return;
+    }
+
+    e.processedByTerminalHandler_ = true;
+
+    if (e.type == 'mouseup' && e.which == 1 && !this.document_.getSelection().isCollapsed) {
+      this.copySource.textContent = this.getSelectionText();
+      this.copySource.select();
+      this.copySource.focus();
+    }
+
+    e.terminalRow = parseInt((e.clientY - this.scrollPort_.visibleRowTopMargin) /
+        this.scrollPort_.characterSize.height) + 1;
+    e.terminalColumn = parseInt(e.clientX /
+        this.scrollPort_.characterSize.width) + 1;
+
+    if (e.type == 'mousedown') {
+      if (e.terminalColumn > this.screenSize.width) {
+        // Mousedown in the scrollbar area.
         return;
       }
 
-      e.processedByTerminalHandler_ = true;
-
-      if (e.type == 'mouseup' && e.which == 1 && this.copyOnSelect &&
-          !this.document_.getSelection().isCollapsed) {
-            f.copyToClipboard(this.document_);
-            return;
-          }
-
-      e.terminalRow = parseInt((e.clientY - this.scrollPort_.visibleRowTopMargin) /
-          this.scrollPort_.characterSize.height) + 1;
-      e.terminalColumn = parseInt(e.clientX /
-          this.scrollPort_.characterSize.width) + 1;
-
-      if (e.type == 'mousedown') {
-        if (e.terminalColumn > this.screenSize.width) {
-          // Mousedown in the scrollbar area.
-          return;
-        }
-
-        if (!this.enableMouseDragScroll) {
-          // Move the scroll-blocker into place if we want to keep the scrollport
-          // from scrolling.
-          this.scrollBlockerNode_.engaged = true;
-          this.scrollBlockerNode_.style.top = (e.clientY - 5) + 'px';
-          this.scrollBlockerNode_.style.left = (e.clientX - 5) + 'px';
-        }
-      } else if (this.scrollBlockerNode_.engaged &&
-          (e.type == 'mousemove' || e.type == 'mouseup')) {
-            // Disengage the scroll-blocker after one of these events.
-            this.scrollBlockerNode_.engaged = false;
-            this.scrollBlockerNode_.style.top = '-99px';
-          }
-
-      this.onMouse(e);
-    };
-
-    /**
-     * Clients should override this if they care to know about mouse events.
-     *
-     * The event parameter will be a normal DOM mouse click event with additional
-     * 'terminalRow' and 'terminalColumn' properties.
-     */
-    Terminal.prototype.onMouse = function(e) { };
-
-    /**
-     * React when focus changes.
-     */
-    Terminal.prototype.onFocusChange_ = function(state) {
-      this.cursorNode_.setAttribute('focus', state ? 'true' : 'false');
-    };
-
-    /**
-     * React when the ScrollPort is scrolled.
-     */
-    Terminal.prototype.onScroll_ = function() {
-      this.scheduleSyncCursorPosition_();
-    };
-
-    /**
-     * React when text is pasted into the scrollPort.
-     */
-    Terminal.prototype.onPaste_ = function(e) {
-      var text = this.vt.encodeUTF8(e.text);
-      text = text.replace(/\n/mg, '\r');
-      this.io.onVTKeystroke(text);
-    };
-
-    /**
-     * React when the user tries to copy from the scrollPort.
-     */
-    Terminal.prototype.onCopy_ = function(e) {
-      e.preventDefault();
-      this.copySelectionToClipboard();
-    };
-
-    /**
-     * React when the ScrollPort is resized.
-     *
-     * Note: This function should not directly contain code that alters the internal
-     * state of the terminal.  That kind of code belongs in realizeWidth or
-     * realizeHeight, so that it can be executed synchronously in the case of a
-     * programmatic width change.
-     */
-    Terminal.prototype.onResize_ = function() {
-      var columnCount = Math.floor(this.scrollPort_.getScreenWidth() /
-          this.scrollPort_.characterSize.width);
-      var rowCount = Math.floor(this.scrollPort_.getScreenHeight() /
-          this.scrollPort_.characterSize.height);
-
-      if (columnCount <= 0 || rowCount <= 0) {
-        // We avoid these situations since they happen sometimes when the terminal
-        // gets removed from the document or during the initial load, and we can't
-        // deal with that.
-        return;
+      if (!this.enableMouseDragScroll) {
+        // Move the scroll-blocker into place if we want to keep the scrollport
+        // from scrolling.
+        this.scrollBlockerNode_.engaged = true;
+        this.scrollBlockerNode_.style.top = (e.clientY - 5) + 'px';
+        this.scrollBlockerNode_.style.left = (e.clientX - 5) + 'px';
       }
-
-      // We do this even if the size didn't change, just to be sure everything is
-      // in sync.
-      this.realizeSize_(columnCount, rowCount);
-      this.showZoomWarning_(this.scrollPort_.characterSize.zoomFactor != 1);
-
-      this.scheduleSyncCursorPosition_();
-    };
-
-    Terminal.prototype.listenToSelection = function() {
-      var self = this;
-      var copySource = this.document_.createElement('textarea');
-      copySource.style.cssText = (
-          '-webkit-user-select: text;' +
-          'position: absolute;' +
-          'padding: 0;' +
-          'width: 0px;' +
-          'outline: none;' +
-          'top: -99px');
-      this.document_.body.appendChild(copySource);
-
-      setInterval(function() {
-        var selection = self.document_.getSelection();
-        if (selection && selection.getRangeAt(0) && !selection.getRangeAt(0).collapsed) {
-          copySource.textContent = self.getSelectionText();
-          copySource.select();
-          copySource.focus();
+    } else if (this.scrollBlockerNode_.engaged &&
+        (e.type == 'mousemove' || e.type == 'mouseup')) {
+          // Disengage the scroll-blocker after one of these events.
+          this.scrollBlockerNode_.engaged = false;
+          this.scrollBlockerNode_.style.top = '-99px';
         }
-      }, 500);
-    };
 
-    hterm.Terminal = Terminal;
+    this.onMouse(e);
+  };
+
+  /**
+    * Clients should override this if they care to know about mouse events.
+    *
+    * The event parameter will be a normal DOM mouse click event with additional
+    * 'terminalRow' and 'terminalColumn' properties.
+    */
+  Terminal.prototype.onMouse = function(e) { };
+
+  /**
+    * React when focus changes.
+    */
+  Terminal.prototype.onFocusChange_ = function(state) {
+    this.cursorNode_.setAttribute('focus', state ? 'true' : 'false');
+  };
+
+  /**
+    * React when the ScrollPort is scrolled.
+    */
+  Terminal.prototype.onScroll_ = function() {
+    this.scheduleSyncCursorPosition_();
+  };
+
+  /**
+    * React when text is pasted into the scrollPort.
+    */
+  Terminal.prototype.onPaste_ = function(e) {
+    var text = this.vt.encodeUTF8(e.text);
+    text = text.replace(/\n/mg, '\r');
+    this.io.onVTKeystroke(text);
+  };
+
+  /**
+    * React when the user tries to copy from the scrollPort.
+    */
+  Terminal.prototype.onCopy_ = function(e) {
+    e.preventDefault();
+    this.copySelectionToClipboard();
+  };
+
+  /**
+    * React when the ScrollPort is resized.
+    *
+    * Note: This function should not directly contain code that alters the internal
+    * state of the terminal.  That kind of code belongs in realizeWidth or
+    * realizeHeight, so that it can be executed synchronously in the case of a
+    * programmatic width change.
+    */
+  Terminal.prototype.onResize_ = function() {
+    var columnCount = Math.floor(this.scrollPort_.getScreenWidth() /
+        this.scrollPort_.characterSize.width);
+    var rowCount = Math.floor(this.scrollPort_.getScreenHeight() /
+        this.scrollPort_.characterSize.height);
+
+    if (columnCount <= 0 || rowCount <= 0) {
+      // We avoid these situations since they happen sometimes when the terminal
+      // gets removed from the document or during the initial load, and we can't
+      // deal with that.
+      return;
+    }
+
+    // We do this even if the size didn't change, just to be sure everything is
+    // in sync.
+    this.realizeSize_(columnCount, rowCount);
+    this.showZoomWarning_(this.scrollPort_.characterSize.zoomFactor != 1);
+
+    this.scheduleSyncCursorPosition_();
+  };
+
+  hterm.Terminal = Terminal;
 })(hterm,
   hterm.TerminalIO,
   hterm.DefaultPreference,
